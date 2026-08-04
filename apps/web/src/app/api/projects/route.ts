@@ -1,0 +1,212 @@
+import { db } from "@/lib/db";
+import {
+  projects,
+  projectFiles,
+  builds,
+  projectShares,
+  projectPublicShares,
+  labels,
+  projectLabels
+} from "@/lib/db/schema";
+import { withAuth } from "@/lib/auth/middleware";
+import { createProjectSchema } from "@/lib/utils/validation";
+import { findSharedProjectsByUser } from "@/lib/db/queries/projects";
+import * as storage from "@/lib/storage";
+import { MIME_TYPES } from "@backslash/shared";
+import { eq, and, desc, or, isNull, gt } from "drizzle-orm";
+import { NextRequest, NextResponse } from "next/server";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
+
+// ─── GET /api/projects ─────────────────────────────
+// List all projects for the authenticated user, including shared projects.
+export async function GET(request: NextRequest) {
+  return withAuth(request, async (_req, user) => {
+    try {
+      const userProjects = await db
+        .select()
+        .from(projects)
+        .where(eq(projects.userId, user.id))
+        .orderBy(desc(projects.updatedAt));
+
+      const projectsWithDetails = await Promise.all(
+        userProjects.map(async (project) => {
+          // Latest build
+          const [lastBuild] = await db
+            .select({ status: builds.status })
+            .from(builds)
+            .where(eq(builds.projectId, project.id))
+            .orderBy(desc(builds.createdAt), desc(builds.id))
+            .limit(1);
+
+          // Active shares
+          const activeShares = await db
+            .select({ id: projectShares.id })
+            .from(projectShares)
+            .where(
+              and(
+                eq(projectShares.projectId, project.id),
+                or(
+                  isNull(projectShares.expiresAt),
+                  gt(projectShares.expiresAt, new Date())
+                )
+              )
+            );
+
+          // Public share
+          const [publicShare] = await db
+            .select({ id: projectPublicShares.id })
+            .from(projectPublicShares)
+            .where(
+              and(
+                eq(projectPublicShares.projectId, project.id),
+                or(
+                  isNull(projectPublicShares.expiresAt),
+                  gt(projectPublicShares.expiresAt, new Date())
+                )
+              )
+            )
+            .limit(1);
+
+          // Labels
+          const labelsForProject = await db
+            .select({ id: labels.id, name: labels.name })
+            .from(projectLabels)
+            .innerJoin(labels, eq(labels.id, projectLabels.labelId))
+            .where(eq(projectLabels.projectId, project.id));
+
+          return {
+            ...project,
+            lastBuildStatus: lastBuild?.status ?? null,
+            sharedWithCount: activeShares.length,
+            anyoneShared: Boolean(publicShare),
+            isShared: activeShares.length > 0 || Boolean(publicShare),
+            labels: labelsForProject,
+          };
+        })
+      );
+
+      // Also fetch projects shared with this user
+      // Also fetch shared projects
+      const sharedProjects = await findSharedProjectsByUser(user.id);
+      const sharedWithDetails = await Promise.all(
+        sharedProjects.map(async (sp) => {
+          const [lastBuild] = await db
+            .select({ status: builds.status })
+            .from(builds)
+            .where(eq(builds.projectId, sp.id))
+            .orderBy(desc(builds.createdAt), desc(builds.id))
+            .limit(1);
+
+          // Labels
+          const labelsForProject = await db
+            .select({ id: labels.id, name: labels.name })
+            .from(projectLabels)
+            .innerJoin(labels, eq(labels.id, projectLabels.labelId))
+            .where(eq(projectLabels.projectId, sp.id));
+
+          return {
+            ...sp,
+            lastBuildStatus: lastBuild?.status ?? null,
+            labels: labelsForProject,
+          };
+        })
+      );
+
+      return NextResponse.json({
+        projects: projectsWithDetails,
+        sharedProjects: sharedWithDetails,
+      }, {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      });
+    } catch (error) {
+      console.error("Error listing projects:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+  });
+}
+
+// ─── POST /api/projects ────────────────────────────
+// Create a new project from a template.
+
+export async function POST(request: NextRequest) {
+  return withAuth(request, async (req, user) => {
+    try {
+      const body = await req.json();
+
+      const parsed = createProjectSchema.safeParse(body);
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            error: "Validation failed",
+            details: parsed.error.flatten().fieldErrors,
+          },
+          { status: 400 }
+        );
+      }
+
+      const { name, description, engine, template } = parsed.data;
+      const templateName = template ?? "blank";
+
+      const projectId = uuidv4();
+
+      // Create project row in database
+      const [project] = await db
+        .insert(projects)
+        .values({
+          id: projectId,
+          userId: user.id,
+          name,
+          description: description ?? "",
+          engine: engine ?? "auto",
+          mainFile: "main.tex",
+        })
+        .returning();
+
+      // Create project directory and copy template files
+      const projectDir = storage.getProjectDir(user.id, projectId);
+      const copiedFiles = await storage.copyTemplate(templateName, projectDir);
+
+      // Create projectFiles rows for each file copied from the template
+      if (copiedFiles.length > 0) {
+        const fileRows = await Promise.all(
+          copiedFiles.map(async (filePath) => {
+            const ext = path.extname(filePath).toLowerCase();
+            const mimeType = MIME_TYPES[ext] || "text/plain";
+            const fullPath = path.join(projectDir, filePath);
+            let sizeBytes = 0;
+            try {
+              sizeBytes = await storage.getFileSize(fullPath);
+            } catch {
+              // File size check is best-effort
+            }
+
+            return {
+              id: uuidv4(),
+              projectId,
+              path: filePath,
+              mimeType,
+              sizeBytes,
+              isDirectory: false,
+            };
+          })
+        );
+
+        await db.insert(projectFiles).values(fileRows);
+      }
+
+      return NextResponse.json({ project }, { status: 201 });
+    } catch (error) {
+      console.error("Error creating project:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+  });
+}

@@ -1,0 +1,351 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  --animate-fade-in: fadeIn 0.2s ease-out;
+  --animate-slide-up: slideUp 0.2s ease-out;
+  --animate-progress: progress 2s ease-in-out infinite;
+
+  /* Token colors — resolved from CSS custom props set by [data-theme] */
+  --color-bg-primary: var(--theme-bg-primary);
+  --color-bg-secondary: var(--theme-bg-secondary);
+  --color-bg-tertiary: var(--theme-bg-tertiary);
+  --color-bg-elevated: var(--theme-bg-elevated);
+  --color-border: var(--theme-border);
+  --color-text-primary: var(--theme-text-primary);
+  --color-text-secondary: var(--theme-text-secondary);
+  --color-text-muted: var(--theme-text-muted);
+  --color-accent: var(--theme-accent);
+  --color-accent-hover: var(--theme-accent-hover);
+  --color-success: var(--theme-success);
+  --color-error: var(--theme-error);
+  --color-warning: var(--theme-warning);
+
+  --color-editor-bg: var(--theme-editor-bg);
+  --color-editor-gutter: var(--theme-editor-gutter);
+  --color-editor-line-hl: var(--theme-editor-line-hl);
+  --color-editor-selection: var(--theme-editor-selection);
+}
+
+/* ─── Dark theme (Catppuccin Mocha) ──────────────── */
+[data-theme="dark"] {
+  --theme-bg-primary: #1e1e2e;
+  --theme-bg-secondary: #181825;
+  --theme-bg-tertiary: #11111b;
+  --theme-bg-elevated: #313244;
+  --theme-border: #45475a;
+  --theme-text-primary: #cdd6f4;
+  --theme-text-secondary: #a6adc8;
+  --theme-text-muted: #6c7086;
+  --theme-accent: #89b4fa;
+  --theme-accent-hover: #74c7ec;
+  --theme-success: #a6e3a1;
+  --theme-error: #f38ba8;
+  --theme-warning: #fab387;
+
+  --theme-editor-bg: #1e1e2e;
+  --theme-editor-gutter: #181825;
+  --theme-editor-line-hl: #2a2b3d;
+  --theme-editor-selection: rgba(137, 180, 250, 0.3);
+
+  --theme-pdf-shadow: rgba(0, 0, 0, 0.3);
+
+  color-scheme: dark;
+}
+
+/* ─── Light theme (Catppuccin Latte) ─────────────── */
+[data-theme="light"] {
+  --theme-bg-primary: #eff1f5;
+  --theme-bg-secondary: #e6e9ef;
+  --theme-bg-tertiary: #dce0e8;
+  --theme-bg-elevated: #ccd0da;
+  --theme-border: #bcc0cc;
+  --theme-text-primary: #4c4f69;
+  --theme-text-secondary: #5c5f77;
+  --theme-text-muted: #8c8fa1;
+  --theme-accent: #1e66f5;
+  --theme-accent-hover: #2a6ef5;
+  --theme-success: #40a02b;
+  --theme-error: #d20f39;
+  --theme-warning: #fe640b;
+
+  --theme-editor-bg: #eff1f5;
+  --theme-editor-gutter: #e6e9ef;
+  --theme-editor-line-hl: #dce0e8;
+  --theme-editor-selection: #acb0be;
+
+  --theme-pdf-shadow: rgba(0, 0, 0, 0.1);
+
+  color-scheme: light;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes progress {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* react-pdf viewer */
+.react-pdf__Document {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.react-pdf__Page {
+  margin-bottom: 8px;
+  box-shadow: 0 2px 8px var(--theme-pdf-shadow, rgba(0, 0, 0, 0.3));
+}
+
+.react-pdf__Page__canvas {
+  margin: 0 auto;
+  display: block !important;
+}
+
+.react-pdf__Page__textContent {
+  user-select: text;
+}
+
+/* PDF text selection — use browser default */
+
+/* PDF annotation layer - clickable links */
+.react-pdf__Page__annotations {
+  display: block !important;
+}
+
+.react-pdf__Page__annotations a {
+  color: var(--color-accent) !important;
+  text-decoration: underline !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease;
+}
+
+.react-pdf__Page__annotations a:hover {
+  color: var(--color-accent-hover) !important;
+  background-color: rgba(137, 180, 250, 0.1) !important;
+}
+
+[data-theme="light"] .react-pdf__Page__annotations a:hover {
+  background-color: rgba(30, 102, 245, 0.08) !important;
+}
+
+/* Compilation progress bar */
+.compilation-progress {
+  height: 2px;
+  background: var(--color-accent);
+  animation: progress 2s ease-in-out infinite;
+}
+
+/* Sync highlight flash in editor */
+.cm-syncHighlight {
+  background-color: var(--color-accent);
+  opacity: 0.25;
+  border-radius: 2px;
+}
+
+/* ─── CodeMirror 6 Editor Styles ───────────────── */
+
+/* Ensure editor takes full height and allows scrolling */
+.cm-editor {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-editor-bg);
+}
+
+.cm-scroller {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--font-mono) !important;
+  line-height: 1.6;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Editor content — background must be transparent so the selection layer
+   (drawn at z-index:-2 between .cm-editor and .cm-content) remains visible */
+.cm-content {
+  background-color: transparent;
+  color: var(--color-text-primary);
+  padding: 8px 0;
+}
+
+/* Gutter (line numbers) styling */
+.cm-gutters {
+  background-color: var(--color-editor-gutter) !important;
+  border-right: 1px solid var(--color-border) !important;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.cm-lineNumbers {
+  color: var(--color-text-muted);
+}
+
+.cm-lineNumbers .cm-gutterElement {
+  padding: 0 12px 0 8px;
+  min-width: 32px;
+  text-align: right;
+}
+
+/* Active line highlighting */
+.cm-activeLine {
+  background-color: var(--color-editor-line-hl) !important;
+}
+
+.cm-activeLineGutter {
+  background-color: var(--color-editor-line-hl) !important;
+  color: var(--color-text-primary);
+}
+
+/* Selection styling (native + drawSelection fallback) */
+.cm-content::selection,
+.cm-line::selection,
+.cm-line > span::selection {
+  background-color: rgba(137, 180, 250, 0.35) !important;
+  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent) !important;
+}
+
+.cm-selectionBackground {
+  background-color: rgba(137, 180, 250, 0.32) !important;
+  background-color: color-mix(in srgb, var(--color-accent) 32%, transparent) !important;
+}
+
+[data-theme="light"] .cm-content::selection,
+[data-theme="light"] .cm-line::selection,
+[data-theme="light"] .cm-line > span::selection {
+  background-color: rgba(30, 102, 245, 0.22) !important;
+}
+
+[data-theme="light"] .cm-selectionBackground {
+  background-color: rgba(30, 102, 245, 0.2) !important;
+}
+
+/* Cursor styling */
+.cm-cursor {
+  border-left-color: var(--color-text-primary) !important;
+  border-left-width: 2px !important;
+}
+
+/* Native caret color for when drawSelection is not used */
+.cm-content {
+  caret-color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .cm-cursor {
+  border-left-color: #ffffff !important;
+}
+
+[data-theme="dark"] .cm-content {
+  caret-color: #ffffff;
+}
+
+/* Hide local caret while following another collaborator */
+.cm-editor[data-hide-local-cursor="true"] .cm-cursor {
+  opacity: 0 !important;
+}
+
+.cm-editor[data-hide-local-cursor="true"] .cm-content {
+  caret-color: transparent !important;
+}
+
+/* Syntax highlighting - ensure good contrast */
+.cm-keyword { color: #c678dd; }
+.cm-operator { color: #56b6c2; }
+.cm-variable { color: #e06c75; }
+.cm-string { color: #98c379; }
+.cm-comment { color: #5c6370; font-style: italic; }
+.cm-number { color: #d19a66; }
+.cm-property { color: #e06c75; }
+.cm-definition { color: #61afef; }
+.cm-builtin { color: #e5c07b; }
+
+/* For light theme adjustments */
+[data-theme="light"] .cm-keyword { color: #a626a4; }
+[data-theme="light"] .cm-operator { color: #0184bc; }
+[data-theme="light"] .cm-variable { color: #e45649; }
+[data-theme="light"] .cm-string { color: #50a14f; }
+[data-theme="light"] .cm-comment { color: #a0a1a7; font-style: italic; }
+[data-theme="light"] .cm-number { color: #986801; }
+[data-theme="light"] .cm-property { color: #e45649; }
+[data-theme="light"] .cm-definition { color: #4078f2; }
+[data-theme="light"] .cm-builtin { color: #c18401; }
+
+/* Error underline */
+.cm-error-underline {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--color-error);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+  background-color: rgba(243, 139, 168, 0.12);
+  background-color: color-mix(in srgb, var(--color-error) 12%, transparent);
+}
+
+[data-theme="light"] .cm-error-underline {
+  background-color: rgba(210, 15, 57, 0.08);
+}
+
+/* Clickable URL links in editor (Ctrl/Cmd + click to open) */
+.cm-url-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.cm-url-link:hover {
+  color: var(--color-accent-hover);
+  text-decoration-style: solid;
+}
+
+/* Ensure editor fills container properly */
+.cm-editor.cm-focused {
+  outline: none;
+}

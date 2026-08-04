@@ -1,0 +1,265 @@
+"use client";
+
+import { useState } from "react";
+import { cn } from "@/lib/utils/cn";
+import {
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Loader2,
+  Ban,
+  ChevronUp,
+  ChevronDown,
+  Sparkles,
+} from "lucide-react";
+
+// ─── Types ──────────────────────────────────────────
+
+interface LogError {
+  type: string;
+  file: string;
+  line: number;
+  message: string;
+}
+
+interface BuildLogsProps {
+  logs: string;
+  status: string;
+  duration: number | null;
+  errors: LogError[];
+  actorName?: string | null;
+  onErrorClick?: (file: string, line: number) => void;
+  canFixWithAi?: boolean;
+  fixingWithAi?: boolean;
+  onFixWithAi?: () => void;
+  aiExplanation?: string | null;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
+// ─── Helpers ────────────────────────────────────────
+
+function getStatusIcon(status: string) {
+  switch (status) {
+    case "success":
+      return <CheckCircle2 className="h-4 w-4 text-success" />;
+    case "error":
+    case "timeout":
+      return <XCircle className="h-4 w-4 text-error" />;
+    case "canceled":
+      return <Ban className="h-4 w-4 text-text-muted" />;
+    case "compiling":
+    case "queued":
+      return <Loader2 className="h-4 w-4 animate-spin text-warning" />;
+    default:
+      return <div className="h-4 w-4 rounded-full border-2 border-text-muted" />;
+  }
+}
+
+function getStatusLabel(status: string): string {
+  switch (status) {
+    case "success":
+      return "Build succeeded";
+    case "error":
+      return "Build failed";
+    case "timeout":
+      return "Build timed out";
+    case "canceled":
+      return "Build canceled";
+    case "compiling":
+      return "Compiling...";
+    case "queued":
+      return "Queued";
+    default:
+      return "No builds";
+  }
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms === null) return "";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+// ─── BuildLogs ──────────────────────────────────────
+
+export function BuildLogs({
+  logs,
+  status,
+  duration,
+  errors,
+  actorName = null,
+  onErrorClick,
+  canFixWithAi = false,
+  fixingWithAi = false,
+  onFixWithAi,
+  aiExplanation = null,
+  expanded,
+  onExpandedChange,
+}: BuildLogsProps) {
+  const [internalExpanded, setInternalExpanded] = useState(true);
+  const isControlled = typeof expanded === "boolean";
+  const isExpanded = isControlled ? (expanded as boolean) : internalExpanded;
+
+  const toggleExpanded = () => {
+    const next = !isExpanded;
+    if (!isControlled) {
+      setInternalExpanded(next);
+    }
+    onExpandedChange?.(next);
+  };
+
+  const errorCount = errors.filter(
+    (e) => e.type === "error" || e.type === "fatal"
+  ).length;
+  const warningCount = errors.filter((e) => e.type === "warning").length;
+
+  return (
+    <div className="flex h-full flex-col bg-bg-secondary">
+      {/* Status bar -- always visible */}
+      <div className="flex items-center justify-between border-b border-border px-4 py-1.5 transition-colors hover:bg-bg-elevated/50">
+        <div className="flex items-center gap-3">
+          {getStatusIcon(status)}
+          <span className="text-xs font-medium text-text-secondary">
+            {getStatusLabel(status)}
+          </span>
+          {actorName && (status === "queued" || status === "compiling") && (
+            <span className="text-xs text-text-muted">by {actorName}</span>
+          )}
+
+          {duration !== null && (
+            <span className="text-xs text-text-muted">
+              {formatDuration(duration)}
+            </span>
+          )}
+
+          {errorCount > 0 && (
+            <span className="flex items-center gap-1 text-xs text-error">
+              <XCircle className="h-3 w-3" />
+              {errorCount} {errorCount === 1 ? "error" : "errors"}
+            </span>
+          )}
+
+          {warningCount > 0 && (
+            <span className="flex items-center gap-1 text-xs text-warning">
+              <AlertTriangle className="h-3 w-3" />
+              {warningCount} {warningCount === 1 ? "warning" : "warnings"}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {canFixWithAi && onFixWithAi && (status === "error" || status === "timeout") && (
+            <button
+              type="button"
+              onClick={onFixWithAi}
+              disabled={fixingWithAi}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-bg-tertiary px-2 py-1 text-[11px] font-medium text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {fixingWithAi ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="h-3 w-3 text-accent" />
+              )}
+              {fixingWithAi ? "Fixing..." : "Fix with AI"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            className="flex items-center text-text-muted"
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronUp className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded content */}
+      {isExpanded && (
+        <div className="flex-1 min-h-0 overflow-auto">
+          {aiExplanation && (
+            <div className="border-b border-border bg-accent/5 px-4 py-2">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-accent">
+                AI Fix Summary
+              </p>
+              <p className="mt-1 text-xs text-text-secondary">{aiExplanation}</p>
+            </div>
+          )}
+
+          {/* Error/warning entries */}
+          {errors.length > 0 && (
+            <div className="border-b border-border">
+              {errors.map((error, index) => {
+                const isError =
+                  error.type === "error" || error.type === "fatal";
+                const isWarning = error.type === "warning";
+
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() =>
+                      onErrorClick?.(error.file, error.line)
+                    }
+                    className={cn(
+                      "flex w-full items-start gap-2 px-4 py-2 text-left text-xs transition-colors hover:bg-bg-elevated/50",
+                      isError && "bg-error/5",
+                      isWarning && "bg-warning/5"
+                    )}
+                  >
+                    {isError ? (
+                      <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-error" />
+                    ) : (
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-warning" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "font-medium",
+                            isError ? "text-error" : "text-warning"
+                          )}
+                        >
+                          {error.type}
+                        </span>
+                        {error.file && (
+                          <span className="text-text-muted">
+                            {error.file}
+                            {error.line > 0 ? `:${error.line}` : ""}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-text-secondary break-all">
+                        {error.message}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Raw log output */}
+          {logs && (
+            <pre className="whitespace-pre-wrap break-all p-4 font-mono text-xs text-text-muted leading-relaxed">
+              {logs}
+            </pre>
+          )}
+
+          {/* Empty state */}
+          {!logs && errors.length === 0 && (
+            <div className="flex items-center justify-center py-8">
+              <p className="text-xs text-text-muted">
+                No build logs available. Compile the project to see output.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

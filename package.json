@@ -1,0 +1,17 @@
+{
+  "name": "backslash",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "drizzle-orm": "0.45.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@tailwindcss/oxide",
+      "sharp",
+      "unrs-resolver",
+      "@parcel/watcher"
+    ]
+  }
+}

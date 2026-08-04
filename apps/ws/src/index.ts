@@ -1,0 +1,866 @@
+import { createServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
+import IORedis from "ioredis";
+import postgres from "postgres";
+import { randomUUID } from "crypto";
+import { jwtVerify } from "jose";
+
+// ─── Shared Types (inlined to avoid monorepo build issues) ─
+
+interface PresenceUser {
+  userId: string;
+  name: string;
+  email: string;
+  color: string;
+  activeFileId: string | null;
+  activeFilePath: string | null;
+}
+
+interface CursorPosition {
+  line: number;
+  ch: number;
+}
+
+interface CursorSelection {
+  anchor: CursorPosition;
+  head: CursorPosition;
+}
+
+interface ChatMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  timestamp: number;
+  kind?: "user" | "system" | "build";
+  build?: {
+    buildId: string;
+    status: "queued" | "compiling" | "success" | "error" | "timeout" | "canceled";
+    durationMs?: number | null;
+    actorUserId?: string | null;
+    actorName?: string | null;
+  };
+}
+
+interface ChatReadReceipt {
+  userId: string;
+  lastReadMessageId: string;
+  timestamp: number;
+}
+
+interface DocChange {
+  from: number;
+  to: number;
+  insert: string;
+}
+
+// ─── Socket.IO Event Maps ──────────────────────────
+
+interface ServerToClientEvents {
+  "self:identity": (data: { userId: string; name: string; email: string; color: string }) => void;
+  "build:status": (data: { projectId: string; buildId: string; status: "queued" | "compiling"; triggeredByUserId?: string | null }) => void;
+  "build:complete": (data: { projectId: string; buildId: string; status: string; pdfUrl: string | null; logs: string; durationMs: number; errors: any[]; triggeredByUserId?: string | null }) => void;
+  "presence:users": (data: { users: PresenceUser[] }) => void;
+  "presence:joined": (data: { user: PresenceUser }) => void;
+  "presence:left": (data: { userId: string }) => void;
+  "presence:updated": (data: { userId: string; activeFileId: string | null; activeFilePath: string | null }) => void;
+  "cursor:updated": (data: { userId: string; fileId: string; selection: CursorSelection }) => void;
+  "cursor:cleared": (data: { userId: string }) => void;
+  "doc:changed": (data: { userId: string; fileId: string; changes: DocChange[]; version: number }) => void;
+  "chat:message": (data: ChatMessage) => void;
+  "chat:history": (data: { messages: ChatMessage[] }) => void;
+  "chat:read": (data: ChatReadReceipt) => void;
+  "chat:readState": (data: { reads: ChatReadReceipt[] }) => void;
+  "file:created": (data: { userId: string; file: { id: string; path: string; isDirectory: boolean } }) => void;
+  "file:deleted": (data: { userId: string; fileId: string; path: string }) => void;
+  "file:saved": (data: { userId: string; fileId: string; path: string }) => void;
+}
+
+interface ClientToServerEvents {
+  "join:project": (data: { projectId: string }) => void;
+  "leave:project": (data: { projectId: string }) => void;
+  "presence:activeFile": (data: { fileId: string | null; filePath: string | null }) => void;
+  "cursor:move": (data: { fileId: string; selection: CursorSelection }) => void;
+  "doc:change": (data: { fileId: string; changes: DocChange[]; version: number }) => void;
+  "chat:send": (data: { text: string }) => void;
+  "chat:read": (data: { lastReadMessageId: string }) => void;
+}
+
+// ─── Configuration ─────────────────────────────────
+
+const PORT = parseInt(process.env.WS_PORT || "3001", 10);
+const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+const DATABASE_URL =
+  process.env.DATABASE_URL ||
+  "postgresql://backslash:backslash@backslash-postgres:5432/backslash";
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-to-a-random-64-char-string";
+
+// ─── Presence Colors ───────────────────────────────
+
+const PRESENCE_COLORS = [
+  "#f38ba8", // red
+  "#fab387", // peach
+  "#f9e2af", // yellow
+  "#a6e3a1", // green
+  "#94e2d5", // teal
+  "#89b4fa", // blue
+  "#b4befe", // lavender
+  "#cba6f7", // mauve
+  "#f5c2e7", // pink
+  "#89dceb", // sky
+];
+
+let colorIndex = 0;
+function nextColor(): string {
+  const color = PRESENCE_COLORS[colorIndex % PRESENCE_COLORS.length];
+  colorIndex++;
+  return color;
+}
+
+// ─── Database ──────────────────────────────────────
+
+const sql = postgres(DATABASE_URL);
+
+/**
+ * Validates a session token against the database.
+ * Returns user info if valid, null otherwise.
+ */
+async function validateSession(
+  token: string
+): Promise<{ id: string; email: string; name: string } | null> {
+  try {
+    let result: { id: string; email: string; name: string }[] = [];
+
+    // Preferred path: JWT session token with session id claim.
+    try {
+      const { payload } = await jwtVerify(
+        token,
+        new TextEncoder().encode(SESSION_SECRET),
+        { algorithms: ["HS256"] }
+      );
+      const userId = payload.sub;
+      const sessionId = payload.sid;
+      const tokenUse = payload.use;
+
+      if (
+        typeof userId === "string" &&
+        typeof sessionId === "string" &&
+        tokenUse === "session"
+      ) {
+        result = await sql`
+          SELECT u.id, u.email, u.name
+          FROM sessions s
+          INNER JOIN users u ON s.user_id = u.id
+          WHERE s.token = ${sessionId}
+            AND s.user_id = ${userId}
+            AND s.expires_at > NOW()
+          LIMIT 1
+        `;
+      } else {
+        result = [];
+      }
+    } catch {
+      // Backward-compatible path for legacy opaque session tokens.
+      result = await sql`
+        SELECT u.id, u.email, u.name
+        FROM sessions s
+        INNER JOIN users u ON s.user_id = u.id
+        WHERE s.token = ${token}
+          AND s.expires_at > NOW()
+        LIMIT 1
+      `;
+    }
+
+    if (result.length === 0) return null;
+    return result[0] as { id: string; email: string; name: string };
+  } catch (err) {
+    console.error("[WS] Session validation error:", err);
+    return null;
+  }
+}
+
+/**
+ * Check if a user has access to a project (owner or shared).
+ */
+async function checkProjectAccess(
+  userId: string,
+  projectId: string,
+  shareToken?: string | null
+): Promise<{ access: boolean; role: "owner" | "viewer" | "editor" }> {
+  try {
+    // Check if owner
+    const ownerResult = await sql`
+      SELECT id FROM projects
+      WHERE id = ${projectId} AND user_id = ${userId}
+      LIMIT 1
+    `;
+    if (ownerResult.length > 0) {
+      return { access: true, role: "owner" };
+    }
+
+    // Check if shared
+    const shareResult = await sql`
+      SELECT role FROM project_shares
+      WHERE project_id = ${projectId}
+        AND user_id = ${userId}
+        AND (expires_at IS NULL OR expires_at > NOW())
+      LIMIT 1
+    `;
+    if (shareResult.length > 0) {
+      return { access: true, role: shareResult[0].role as "viewer" | "editor" };
+    }
+
+    // Public-share access requires a matching token.
+    if (shareToken) {
+      const tokenShareResult = await sql`
+        SELECT role FROM project_public_shares
+        WHERE project_id = ${projectId}
+          AND token = ${shareToken}
+          AND (expires_at IS NULL OR expires_at > NOW())
+        LIMIT 1
+      `;
+      if (tokenShareResult.length > 0) {
+        return {
+          access: true,
+          role: tokenShareResult[0].role as "viewer" | "editor",
+        };
+      }
+    }
+
+    return { access: false, role: "viewer" };
+  } catch (err) {
+    console.error("[WS] Project access check error:", err);
+    return { access: false, role: "viewer" };
+  }
+}
+
+// ─── Redis Pub/Sub ─────────────────────────────────
+
+const subscriber = new IORedis(REDIS_URL, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  retryStrategy(times: number) {
+    return Math.min(times * 200, 5000);
+  },
+});
+
+subscriber.on("error", (err) => {
+  console.error("[Redis] Subscriber error:", err.message);
+});
+
+subscriber.on("connect", () => {
+  console.log("[Redis] Subscriber connected");
+});
+
+// ─── Socket.IO Server ──────────────────────────────
+
+const httpServer = createServer((_req, res) => {
+  // Health check endpoint
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ status: "ok", service: "backslash-ws" }));
+});
+
+const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+  cors: {
+    origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN.split(","),
+    credentials: true,
+  },
+  transports: ["websocket", "polling"],
+  path: process.env.WS_PATH_PREFIX
+    ? `${process.env.WS_PATH_PREFIX}/socket.io`
+    : "/socket.io",
+  pingInterval: 25000,
+  pingTimeout: 20000,
+});
+
+// ─── Room Helpers ──────────────────────────────────
+
+function getUserRoom(userId: string): string {
+  return `user:${userId}`;
+}
+
+function getProjectRoom(projectId: string): string {
+  return `project:${projectId}`;
+}
+
+// ─── In-memory State ───────────────────────────────
+
+// Presence: projectId -> Map<userId, PresenceUser>
+const presenceMap = new Map<string, Map<string, PresenceUser>>();
+
+// Chat history: projectId -> ChatMessage[] (last 100)
+const chatHistory = new Map<string, ChatMessage[]>();
+// Per-project chat read markers: projectId -> Map<userId, ChatReadReceipt>
+const chatReadState = new Map<string, Map<string, ChatReadReceipt>>();
+// Track completed builds we already announced in chat to avoid duplicate spam.
+const buildChatPosted = new Map<string, string>();
+
+const MAX_CHAT_HISTORY = 100;
+const MAX_BUILD_CHAT_POSTED = 1000;
+
+// Track which project each socket is in: socketId -> projectId
+const socketProjectMap = new Map<string, string>();
+const connectedUserSocketCounts = new Map<string, number>();
+const connectedUserNames = new Map<string, string>();
+
+function getProjectPresence(projectId: string): Map<string, PresenceUser> {
+  let map = presenceMap.get(projectId);
+  if (!map) {
+    map = new Map();
+    presenceMap.set(projectId, map);
+  }
+  return map;
+}
+
+function getProjectChat(projectId: string): ChatMessage[] {
+  let msgs = chatHistory.get(projectId);
+  if (!msgs) {
+    msgs = [];
+    chatHistory.set(projectId, msgs);
+  }
+  return msgs;
+}
+
+function addChatMessage(projectId: string, msg: ChatMessage): void {
+  const msgs = getProjectChat(projectId);
+  msgs.push(msg);
+  if (msgs.length > MAX_CHAT_HISTORY) {
+    msgs.shift();
+  }
+}
+
+function getProjectReadState(projectId: string): Map<string, ChatReadReceipt> {
+  let reads = chatReadState.get(projectId);
+  if (!reads) {
+    reads = new Map();
+    chatReadState.set(projectId, reads);
+  }
+  return reads;
+}
+
+function upsertReadState(
+  projectId: string,
+  userId: string,
+  lastReadMessageId: string,
+  timestamp: number = Date.now()
+): ChatReadReceipt {
+  const reads = getProjectReadState(projectId);
+  const receipt: ChatReadReceipt = { userId, lastReadMessageId, timestamp };
+  reads.set(userId, receipt);
+  return receipt;
+}
+
+function formatDuration(durationMs?: number): string {
+  if (!durationMs || durationMs < 0) return "";
+  if (durationMs < 1000) return `${durationMs}ms`;
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function rememberBuildChatPosted(buildKey: string, status: string): void {
+  buildChatPosted.set(buildKey, status);
+  if (buildChatPosted.size > MAX_BUILD_CHAT_POSTED) {
+    const oldestKey = buildChatPosted.keys().next().value as string | undefined;
+    if (oldestKey) {
+      buildChatPosted.delete(oldestKey);
+    }
+  }
+}
+
+// ─── Authentication Middleware ──────────────────────
+
+io.use(async (socket, next) => {
+  try {
+    // Extract session token from cookie header or auth query param
+    const cookieHeader = socket.handshake.headers.cookie;
+    let token = extractCookieToken(cookieHeader);
+    const shareToken =
+      (socket.handshake.auth?.shareToken as string | undefined) ?? null;
+
+    // Fallback: check query param (for environments where cookies aren't forwarded)
+    if (!token && socket.handshake.auth?.token) {
+      token = socket.handshake.auth.token as string;
+    }
+
+    if (!token && shareToken) {
+      const visitorNum = Math.floor(1000 + Math.random() * 9000);
+      socket.data.userId = `anon_${randomUUID()}`;
+      socket.data.email = "anonymous@public-link";
+      socket.data.name = `Visitor ${visitorNum}`;
+      socket.data.color = nextColor();
+      socket.data.isAnonymous = true;
+      socket.data.shareToken = shareToken;
+      return next();
+    }
+
+    if (!token) {
+      return next(new Error("Authentication required or valid share link required"));
+    }
+
+    const user = await validateSession(token);
+    if (!user && shareToken) {
+      const visitorNum = Math.floor(1000 + Math.random() * 9000);
+      socket.data.userId = `anon_${randomUUID()}`;
+      socket.data.email = "anonymous@public-link";
+      socket.data.name = `Visitor ${visitorNum}`;
+      socket.data.color = nextColor();
+      socket.data.isAnonymous = true;
+      socket.data.shareToken = shareToken;
+      return next();
+    }
+
+    if (!user) {
+      return next(new Error("Invalid or expired session"));
+    }
+
+    // Attach user data to socket
+    socket.data.userId = user.id;
+    socket.data.email = user.email;
+    socket.data.name = user.name;
+    socket.data.color = nextColor();
+    socket.data.isAnonymous = false;
+    socket.data.shareToken = shareToken;
+
+    next();
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Authentication failed";
+    next(new Error(message));
+  }
+});
+
+// ─── Connection Handler ────────────────────────────
+
+io.on("connection", (socket) => {
+  const { userId, name, email, color, isAnonymous, shareToken } = socket.data;
+  console.log(`[WS] User connected: ${name} (${userId})`);
+  connectedUserSocketCounts.set(
+    userId,
+    (connectedUserSocketCounts.get(userId) ?? 0) + 1
+  );
+  connectedUserNames.set(userId, name);
+
+  // Tell the client its assigned identity (especially useful for anonymous users)
+  socket.emit("self:identity", { userId, name, email, color });
+
+  // Automatically join the user's personal room
+  if (!isAnonymous) {
+    socket.join(getUserRoom(userId));
+  }
+
+  // ── Join project room ──────────────────────
+
+  socket.on("join:project", async ({ projectId }) => {
+    if (!projectId || typeof projectId !== "string") return;
+
+    // Check access (owner or shared)
+    const { access, role } = await checkProjectAccess(userId, projectId, shareToken);
+    if (!access) {
+      console.warn(`[WS] Access denied for ${name} (${userId}) to project ${projectId}`);
+      return;
+    }
+
+    // Leave any previously joined project
+    const prevProject = socketProjectMap.get(socket.id);
+    if (prevProject && prevProject !== projectId) {
+      leaveProject(socket, prevProject);
+    }
+
+    socket.join(getProjectRoom(projectId));
+    socketProjectMap.set(socket.id, projectId);
+    socket.data.projectId = projectId;
+    socket.data.role = role;
+
+    // Add to presence
+    const presence = getProjectPresence(projectId);
+    const presenceUser: PresenceUser = {
+      userId,
+      name,
+      email,
+      color,
+      activeFileId: null,
+      activeFilePath: null,
+    };
+    presence.set(userId, presenceUser);
+
+    // Send current presence to the joining user
+    socket.emit("presence:users", {
+      users: Array.from(presence.values()),
+    });
+
+    // Send chat history
+    const history = getProjectChat(projectId);
+    if (history.length > 0) {
+      socket.emit("chat:history", { messages: history });
+    }
+    const reads = Array.from(getProjectReadState(projectId).values());
+    if (reads.length > 0) {
+      socket.emit("chat:readState", { reads });
+    }
+
+    // Notify others about the new user
+    socket.to(getProjectRoom(projectId)).emit("presence:joined", {
+      user: presenceUser,
+    });
+
+    console.log(`[WS] User ${name} joined project ${projectId} as ${role}`);
+  });
+
+  // ── Leave project room ─────────────────────
+
+  socket.on("leave:project", ({ projectId }) => {
+    if (!projectId || typeof projectId !== "string") return;
+    leaveProject(socket, projectId);
+  });
+
+  // ── Presence: active file ──────────────────
+
+  socket.on("presence:activeFile", ({ fileId, filePath }) => {
+    const projectId = socket.data.projectId;
+    if (!projectId) return;
+
+    const presence = getProjectPresence(projectId);
+    const existing = presence.get(userId);
+    if (existing) {
+      existing.activeFileId = fileId;
+      existing.activeFilePath = filePath;
+    }
+
+    socket.to(getProjectRoom(projectId)).emit("presence:updated", {
+      userId,
+      activeFileId: fileId,
+      activeFilePath: filePath,
+    });
+  });
+
+  // ── Cursor movement ────────────────────────
+
+  socket.on("cursor:move", ({ fileId, selection }) => {
+    const projectId = socket.data.projectId;
+    if (!projectId) return;
+
+    socket.to(getProjectRoom(projectId)).emit("cursor:updated", {
+      userId,
+      fileId,
+      selection,
+    });
+  });
+
+  // ── Document changes (collaborative) ───────
+
+  socket.on("doc:change", ({ fileId, changes, version }) => {
+    const projectId = socket.data.projectId;
+    if (!projectId) return;
+
+    // Viewers can't send document changes
+    if (socket.data.role === "viewer") return;
+
+    // Relay to all other users in the project
+    socket.to(getProjectRoom(projectId)).emit("doc:changed", {
+      userId,
+      fileId,
+      changes,
+      version,
+    });
+  });
+
+  // ── Chat ───────────────────────────────────
+
+  socket.on("chat:send", ({ text }) => {
+    const projectId = socket.data.projectId;
+    if (!projectId || !text || !text.trim()) return;
+
+    const msg: ChatMessage = {
+      id: randomUUID(),
+      userId,
+      userName: name,
+      text: text.trim(),
+      timestamp: Date.now(),
+      kind: "user",
+    };
+
+    addChatMessage(projectId, msg);
+
+    // Broadcast to everyone in the project room (including sender)
+    const projectRoom = getProjectRoom(projectId);
+    io.to(projectRoom).emit("chat:message", msg);
+    const senderRead = upsertReadState(projectId, userId, msg.id, msg.timestamp);
+    io.to(projectRoom).emit("chat:read", senderRead);
+  });
+
+  socket.on("chat:read", ({ lastReadMessageId }) => {
+    const projectId = socket.data.projectId;
+    if (!projectId || !lastReadMessageId) return;
+
+    const history = getProjectChat(projectId);
+    const messageExists = history.some((msg) => msg.id === lastReadMessageId);
+    if (!messageExists) return;
+
+    const current = getProjectReadState(projectId).get(userId);
+    if (current?.lastReadMessageId === lastReadMessageId) {
+      return;
+    }
+
+    const receipt = upsertReadState(projectId, userId, lastReadMessageId);
+    io.to(getProjectRoom(projectId)).emit("chat:read", receipt);
+  });
+
+  // ── Disconnect ─────────────────────────────
+
+  socket.on("disconnect", (reason) => {
+    const projectId = socketProjectMap.get(socket.id);
+    if (projectId) {
+      leaveProject(socket, projectId);
+    }
+    const remaining = (connectedUserSocketCounts.get(userId) ?? 1) - 1;
+    if (remaining <= 0) {
+      connectedUserSocketCounts.delete(userId);
+      connectedUserNames.delete(userId);
+    } else {
+      connectedUserSocketCounts.set(userId, remaining);
+    }
+    console.log(`[WS] User disconnected: ${name} (${userId}) - ${reason}`);
+  });
+
+  socket.on("error", (err) => {
+    console.error(`[WS] Socket error for ${userId}:`, err.message);
+  });
+});
+
+/**
+ * Remove a socket from a project room and clean up presence.
+ */
+function leaveProject(socket: any, projectId: string) {
+  const userId = socket.data.userId;
+
+  socket.leave(getProjectRoom(projectId));
+  socketProjectMap.delete(socket.id);
+
+  // Remove from presence
+  const presence = getProjectPresence(projectId);
+  presence.delete(userId);
+
+  // Clean up empty maps
+  if (presence.size === 0) {
+    presenceMap.delete(projectId);
+  }
+
+  // Notify others
+  socket.to(getProjectRoom(projectId)).emit("presence:left", { userId });
+  socket.to(getProjectRoom(projectId)).emit("cursor:cleared", { userId });
+
+  if (socket.data.projectId === projectId) {
+    socket.data.projectId = null;
+    socket.data.role = null;
+  }
+}
+
+// ─── Redis Subscription ────────────────────────────
+
+const BUILD_CHANNEL = "build:updates";
+const FILE_CHANNEL = "file:updates";
+
+subscriber.subscribe(BUILD_CHANNEL, FILE_CHANNEL, (err) => {
+  if (err) {
+    console.error("[Redis] Failed to subscribe:", err);
+  } else {
+    console.log(`[Redis] Subscribed to ${BUILD_CHANNEL}, ${FILE_CHANNEL}`);
+  }
+});
+
+subscriber.on("message", (channel, message) => {
+  try {
+    if (channel === BUILD_CHANNEL) {
+      handleBuildUpdate(message);
+    } else if (channel === FILE_CHANNEL) {
+      handleFileUpdate(message);
+    }
+  } catch (err) {
+    console.error("[WS] Failed to process Redis message:", err);
+  }
+});
+
+function handleBuildUpdate(message: string) {
+  const { userId, payload } = JSON.parse(message) as {
+    userId: string;
+    payload: any;
+  };
+
+  const userRoom = getUserRoom(userId);
+  const projectRoom = getProjectRoom(payload.projectId);
+  const triggeredByUserId = payload.triggeredByUserId ?? null;
+
+  // Determine event type based on status
+  const isComplete =
+    payload.status === "success" ||
+    payload.status === "error" ||
+    payload.status === "timeout" ||
+    payload.status === "canceled";
+
+  if (isComplete) {
+    io.to(userRoom).to(projectRoom).emit("build:complete", {
+      projectId: payload.projectId,
+      buildId: payload.buildId,
+      status: payload.status,
+      pdfUrl: payload.pdfUrl ?? null,
+      logs: payload.logs ?? "",
+      durationMs: payload.durationMs ?? 0,
+      errors: payload.errors ?? [],
+      triggeredByUserId,
+    });
+  } else {
+    io.to(userRoom).to(projectRoom).emit("build:status", {
+      projectId: payload.projectId,
+      buildId: payload.buildId,
+      status: payload.status,
+      triggeredByUserId,
+    });
+  }
+
+  // Keep chat build notifications concise: only post final build result once.
+  if (!isComplete) {
+    return;
+  }
+
+  const buildKey = `${payload.projectId}:${payload.buildId}`;
+  if (buildChatPosted.has(buildKey)) {
+    return;
+  }
+  rememberBuildChatPosted(buildKey, payload.status);
+
+  const actorName = triggeredByUserId
+    ? connectedUserNames.get(triggeredByUserId) ?? null
+    : null;
+  const actorLabel = actorName ?? "A collaborator";
+
+  let text = "";
+  switch (payload.status) {
+    case "success":
+      text = `${actorLabel} completed a successful build${formatDuration(payload.durationMs) ? ` in ${formatDuration(payload.durationMs)}` : ""}.`;
+      break;
+    case "timeout":
+      text = `${actorLabel}'s build timed out${formatDuration(payload.durationMs) ? ` after ${formatDuration(payload.durationMs)}` : ""}.`;
+      break;
+    case "canceled":
+      text = `${actorLabel} canceled the build.`;
+      break;
+    default:
+      text = `${actorLabel}'s build failed${formatDuration(payload.durationMs) ? ` after ${formatDuration(payload.durationMs)}` : ""}.`;
+      break;
+  }
+
+  const buildMessage: ChatMessage = {
+    id: randomUUID(),
+    userId: "system:build",
+    userName: "Build Bot",
+    text,
+    timestamp: Date.now(),
+    kind: "build",
+    build: {
+      buildId: payload.buildId,
+      status: payload.status,
+      durationMs: payload.durationMs ?? null,
+      actorUserId: triggeredByUserId,
+      actorName,
+    },
+  };
+
+  addChatMessage(payload.projectId, buildMessage);
+  io.to(projectRoom).emit("chat:message", buildMessage);
+}
+
+function handleFileUpdate(message: string) {
+  const payload = JSON.parse(message) as {
+    type: string;
+    projectId: string;
+    userId: string;
+    fileId: string;
+    path: string;
+    isDirectory?: boolean;
+  };
+
+  const projectRoom = getProjectRoom(payload.projectId);
+
+  switch (payload.type) {
+    case "file:created":
+      io.to(projectRoom).emit("file:created", {
+        userId: payload.userId,
+        file: {
+          id: payload.fileId,
+          path: payload.path,
+          isDirectory: payload.isDirectory ?? false,
+        },
+      });
+      break;
+    case "file:deleted":
+      io.to(projectRoom).emit("file:deleted", {
+        userId: payload.userId,
+        fileId: payload.fileId,
+        path: payload.path,
+      });
+      break;
+    case "file:saved":
+      io.to(projectRoom).emit("file:saved", {
+        userId: payload.userId,
+        fileId: payload.fileId,
+        path: payload.path,
+      });
+      break;
+  }
+}
+
+// ─── Start Server ──────────────────────────────────
+
+httpServer.listen(PORT, "0.0.0.0", () => {
+  console.log("");
+  console.log("╔══════════════════════════════════════╗");
+  console.log("║   Backslash WebSocket Server         ║");
+  console.log("╠══════════════════════════════════════╣");
+  console.log(`║  Port:     ${String(PORT).padEnd(25)}║`);
+  console.log(`║  Redis:    ${REDIS_URL.padEnd(25)}║`);
+  console.log(`║  Database: [configured]${" ".repeat(14)}║`);
+  console.log(`║  CORS:     ${CORS_ORIGIN.substring(0, 25).padEnd(25)}║`);
+  console.log("╚══════════════════════════════════════╝");
+  console.log("");
+  console.log("[WS] Server ready — waiting for connections...");
+});
+
+// ─── Graceful Shutdown ─────────────────────────────
+
+async function shutdown(signal: string) {
+  console.log(`\n[WS] Received ${signal}, shutting down...`);
+
+  // Disconnect all clients
+  const sockets = await io.fetchSockets();
+  for (const socket of sockets) {
+    socket.disconnect(true);
+  }
+
+  // Close servers
+  await new Promise<void>((resolve) => {
+    io.close(() => resolve());
+  });
+
+  subscriber.disconnect();
+  await sql.end();
+
+  console.log("[WS] Shutdown complete");
+  process.exit(0);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+// ─── Helpers ───────────────────────────────────────
+
+function extractCookieToken(cookieHeader?: string): string | null {
+  if (!cookieHeader) return null;
+  const cookies = cookieHeader.split(";").map((c) => c.trim());
+  for (const cookie of cookies) {
+    const [name, ...rest] = cookie.split("=");
+    if (name.trim() === "session") {
+      return rest.join("=").trim();
+    }
+  }
+  return null;
+}
