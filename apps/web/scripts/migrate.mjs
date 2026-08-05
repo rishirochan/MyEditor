@@ -10,12 +10,25 @@ const LOCK_KEY_1 = 2085062334;
 const LOCK_KEY_2 = 1804289383;
 const IGNORED_NOTICE_CODES = new Set(["42P06", "42P07"]);
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Run straight from node, this gets none of the .env loading that next and
+// drizzle-kit do for themselves, so a local `pnpm db:migrate` would fall back to
+// the in-cluster hostname and fail. In Docker there is no .env file and the
+// environment already carries DATABASE_URL.
+const envFile = path.resolve(__dirname, "../.env");
+if (fs.existsSync(envFile)) {
+  try {
+    process.loadEnvFile(envFile);
+  } catch (error) {
+    console.warn(`[migrate] Could not read ${envFile}: ${error.message}`);
+  }
+}
+
 const DATABASE_URL =
   process.env.DATABASE_URL ||
   "postgresql://backslash:backslash@backslash-postgres:5432/backslash";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // In Docker runtime, standalone output does not expose workspace node_modules in
 // a regular layout. Keep a dedicated migration dependency folder as fallback.
