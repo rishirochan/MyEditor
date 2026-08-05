@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { labels, projectLabels } from "@/lib/db/schema";
+import { labels } from "@/lib/db/schema";
 import { withAuth } from "@/lib/auth/middleware";
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";

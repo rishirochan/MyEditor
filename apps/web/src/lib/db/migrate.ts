@@ -78,19 +78,6 @@ async function ensureMigrationsTable(client: postgres.Sql): Promise<void> {
   `);
 }
 
-async function hasMigrationHash(
-  client: postgres.Sql,
-  hash: string
-): Promise<boolean> {
-  const rows = await client`
-    SELECT 1
-    FROM public.__drizzle_migrations
-    WHERE hash = ${hash}
-    LIMIT 1
-  `;
-  return rows.length > 0;
-}
-
 async function insertMigrationHash(
   client: postgres.Sql,
   hash: string,
