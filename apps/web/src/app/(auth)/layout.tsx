@@ -11,7 +11,7 @@ export default function AuthLayout({
         <div className="mb-8 text-center">
           <Link href="/" className="inline-block">
             <span className="text-2xl font-bold text-accent font-mono">
-              \Backslash
+              MyEditor
             </span>
           </Link>
         </div>

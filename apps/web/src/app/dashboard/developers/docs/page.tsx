@@ -1034,7 +1034,7 @@ export default function ApiDocsPage() {
           API Documentation
         </h1>
         <p className="text-text-secondary mb-8">
-          The Backslash API lets you compile LaTeX documents, manage projects,
+          The MyEditor API lets you compile LaTeX documents, manage projects,
           and upload files programmatically. Public API endpoints use API key
           auth, while dashboard AI endpoints use session auth.
         </p>

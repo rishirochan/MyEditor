@@ -3,13 +3,13 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Backslash",
+  title: "MyEditor",
   description: "Open-source LaTeX editor with live PDF preview",
   icons: {
     icon: "/icon.svg",
   },
   openGraph: {
-    title: "Backslash",
+    title: "MyEditor",
     description: "Open-source LaTeX editor with live PDF preview",
     type: "website",
   },

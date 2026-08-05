@@ -527,7 +527,7 @@ export default function DeveloperDashboardPage() {
             Developer Settings
           </h1>
           <p className="mt-1 text-sm text-text-secondary">
-            Manage API keys and integrate with the Backslash API
+            Manage API keys and integrate with the MyEditor API
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -604,7 +604,7 @@ export default function DeveloperDashboardPage() {
             No API keys
           </h3>
           <p className="mt-1 text-sm text-text-secondary text-center max-w-sm">
-            Create an API key to start using the Backslash API for programmatic
+            Create an API key to start using the MyEditor API for programmatic
             LaTeX compilation and project management.
           </p>
           <button

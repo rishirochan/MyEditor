@@ -10,7 +10,6 @@ import {
   Key,
   Sun,
   Moon,
-  Github,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -86,18 +85,8 @@ export function AppHeader({ children, leftContent, className }: AppHeaderProps) 
             className="flex items-center gap-1.5 shrink-0 text-accent hover:text-accent-hover transition-colors"
           >
             <span className="text-base font-bold hidden sm:inline font-mono">
-              \Backslash
+              MyEditor
             </span>
-          </a>
-          <a
-            href="https://github.com/Manan-Santoki/Backslash"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden sm:inline-flex items-center gap-1 text-xs text-text-muted transition-colors hover:text-accent"
-            title="Open GitHub repository"
-          >
-            <Github className="h-3.5 w-3.5" />
-            GitHub
           </a>
           {leftContent}
         </div>

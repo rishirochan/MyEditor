@@ -47,7 +47,7 @@ export default async function HomePage() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex items-center gap-2">
             <span className="text-xl font-bold text-accent font-mono">
-              \Backslash
+              MyEditor
             </span>
           </Link>
           <div className="flex items-center gap-4">
@@ -95,12 +95,6 @@ export default async function HomePage() {
           >
             {isLoggedIn ? "Open Dashboard" : "Get Started"}
           </Link>
-          <a
-            href="https://github.com/Manan-Santoki/Backslash"
-            className="rounded-lg border border-border bg-bg-elevated px-6 py-3 text-base font-medium text-text-primary transition-colors hover:bg-border"
-          >
-            View on GitHub
-          </a>
         </div>
       </section>
 
@@ -130,7 +124,7 @@ export default async function HomePage() {
       <footer className="mt-auto border-t border-border bg-bg-secondary/50">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
           <span className="text-sm text-text-muted font-mono">
-            \Backslash
+            MyEditor
           </span>
           <span className="text-sm text-text-muted">
             Open-source LaTeX editor
