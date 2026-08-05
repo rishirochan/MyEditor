@@ -11,6 +11,8 @@ export type AiPurpose = "buildFix" | "latexWriter";
 export interface AiModelSettings {
   provider: AiProvider;
   model: string;
+  /** Reasoning / intelligence effort for CLI providers (e.g. low, medium, high). */
+  effort: string | null;
   endpoint: string | null;
   apiKey: string | null;
 }
@@ -24,6 +26,7 @@ export interface UserAiSettings {
 export interface PublicAiModelSettings {
   provider: AiProvider;
   model: string;
+  effort: string | null;
   endpoint: string | null;
   apiKeySet: boolean;
 }

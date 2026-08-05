@@ -5,6 +5,7 @@ const CLAUDE_TIMEOUT_MS = 45_000;
 
 export async function completeWithClaudeCli(params: {
   model: string;
+  effort?: string | null;
   systemPrompt: string;
   userPrompt: string;
 }): Promise<string> {
@@ -22,6 +23,11 @@ export async function completeWithClaudeCli(params: {
     "--model",
     params.model,
   ];
+
+  const effort = params.effort?.trim();
+  if (effort) {
+    args.push("--effort", effort);
+  }
 
   return new Promise<string>((resolve, reject) => {
     const child = spawn(binaryPath, args, {
