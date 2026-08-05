@@ -113,12 +113,6 @@ interface EditorLayoutProps {
   onIdentityResolved?: (user: CurrentUser) => void;
 }
 
-interface AiSettingsResponse {
-  settings: {
-    enabled: boolean;
-  };
-}
-
 // ─── Editor Layout ──────────────────────────────────
 
 export function EditorLayout({
@@ -169,7 +163,6 @@ export function EditorLayout({
   const [buildErrors, setBuildErrors] = useState<LogError[]>([]);
   const [aiFixExplanation, setAiFixExplanation] = useState<string | null>(null);
   const [fixingWithAi, setFixingWithAi] = useState(false);
-  const [aiFixEnabled, setAiFixEnabled] = useState(false);
   const [buildLogsExpanded, setBuildLogsExpanded] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
 
@@ -187,6 +180,9 @@ export function EditorLayout({
 
   // Ref-based compiling flag: avoids stale closures in callbacks
   const compilingRef = useRef(false);
+  // Build currently owned by this editor session — ignore WS/poll events for others.
+  // "pending" means we started a compile but don't have the server buildId yet.
+  const currentBuildIdRef = useRef<string | null>(null);
   // When a save+compile is requested while already compiling, set this flag.
   // After the current build completes successfully, we'll trigger a recompile.
   const pendingRecompileRef = useRef(false);
@@ -344,38 +340,6 @@ export function EditorLayout({
     [currentUser.id, presenceUsers]
   );
 
-  useEffect(() => {
-    if (!canEdit || shareToken) {
-      setAiFixEnabled(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const res = await fetch("/api/ai/settings", { cache: "no-store" });
-        if (!res.ok || cancelled) {
-          if (!cancelled) setAiFixEnabled(false);
-          return;
-        }
-
-        const data = (await res.json()) as AiSettingsResponse;
-        if (!cancelled) {
-          setAiFixEnabled(Boolean(data.settings?.enabled));
-        }
-      } catch {
-        if (!cancelled) {
-          setAiFixEnabled(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canEdit, shareToken]);
-
   // ─── Helpers ───────────────────────────────────────
 
   const clearAllPolling = useCallback(() => {
@@ -392,10 +356,35 @@ export function EditorLayout({
   /** Reset all compiling state back to idle */
   const resetCompileState = useCallback(() => {
     compilingRef.current = false;
+    currentBuildIdRef.current = null;
     setCompiling(false);
     setPdfLoading(false);
     clearAllPolling();
   }, [clearAllPolling]);
+
+  const isCurrentBuild = useCallback((buildId: string | null | undefined) => {
+    const current = currentBuildIdRef.current;
+    if (!current) return true;
+    // Still waiting for our buildId — don't accept completes for a prior build
+    if (current === "pending") return false;
+    if (!buildId) return false;
+    return current === buildId;
+  }, []);
+
+  const beginCompileTracking = useCallback((buildId?: string | null) => {
+    currentBuildIdRef.current =
+      typeof buildId === "string" && buildId.length > 0 ? buildId : "pending";
+  }, []);
+
+  const adoptBuildIdIfPending = useCallback((buildId: string | null | undefined) => {
+    if (
+      currentBuildIdRef.current === "pending" &&
+      typeof buildId === "string" &&
+      buildId.length > 0
+    ) {
+      currentBuildIdRef.current = buildId;
+    }
+  }, []);
 
   const applyChangesToCache = useCallback(
     (fileId: string, changes: DocChange[]) => {
@@ -480,6 +469,16 @@ export function EditorLayout({
         const logsData = await logsRes.json();
         const build = logsData.build;
 
+        if (currentBuildIdRef.current === "pending") {
+          if (build?.status === "queued" || build?.status === "compiling") {
+            adoptBuildIdIfPending(build.id);
+          } else {
+            return;
+          }
+        } else if (!isCurrentBuild(build?.id)) {
+          return;
+        }
+
         if (
           build.status === "success" ||
           build.status === "error" ||
@@ -504,12 +503,17 @@ export function EditorLayout({
             if (pendingRecompileRef.current) {
               pendingRecompileRef.current = false;
               setBuildStatus("queued");
+              beginCompileTracking();
               saveViewPositionsBeforeBuild();
               fetch(withShareToken(`/api/projects/${project.id}/compile`), {
                 method: "POST",
               })
-                .then((res) => {
+                .then(async (res) => {
                   if (res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    if (typeof data.buildId === "string") {
+                      currentBuildIdRef.current = data.buildId;
+                    }
                     startBuildPolling();
                   } else {
                     resetCompileState();
@@ -562,7 +566,10 @@ export function EditorLayout({
   // navigateToFirstError is defined later in this module.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    adoptBuildIdIfPending,
+    beginCompileTracking,
     clearAllPolling,
+    isCurrentBuild,
     project.id,
     resetCompileState,
     restoreViewPositionsAfterBuild,
@@ -589,6 +596,7 @@ export function EditorLayout({
 
         if (build.status === "queued" || build.status === "compiling") {
           // Build is actually still running — start tracking it
+          currentBuildIdRef.current = build.id ?? null;
           compilingRef.current = true;
           setCompiling(true);
           setBuildStatus(build.status);
@@ -640,6 +648,13 @@ export function EditorLayout({
       }
     },
     onBuildStatus: (data) => {
+      if (currentBuildIdRef.current === "pending") {
+        adoptBuildIdIfPending(data.buildId);
+      } else if (compilingRef.current && !isCurrentBuild(data.buildId)) {
+        return;
+      } else {
+        currentBuildIdRef.current = data.buildId;
+      }
       setBuildStatus(data.status);
       setBuildActorName(resolveActorName(data.triggeredByUserId));
       if (!compilingRef.current) {
@@ -649,6 +664,9 @@ export function EditorLayout({
       setPdfLoading(true);
     },
     onBuildComplete: (data) => {
+      if (currentBuildIdRef.current === "pending") return;
+      if (!isCurrentBuild(data.buildId)) return;
+
       clearAllPolling();
 
       setBuildStatus(data.status);
@@ -666,12 +684,17 @@ export function EditorLayout({
           pendingRecompileRef.current = false;
           setBuildStatus("queued");
           setPdfLoading(true);
+          beginCompileTracking();
           saveViewPositionsBeforeBuild();
           fetch(withShareToken(`/api/projects/${project.id}/compile`), {
             method: "POST",
           })
-            .then((res) => {
+            .then(async (res) => {
               if (res.ok) {
+                const body = await res.json().catch(() => ({}));
+                if (typeof body.buildId === "string") {
+                  currentBuildIdRef.current = body.buildId;
+                }
                 startBuildPolling();
               } else {
                 resetCompileState();
@@ -920,6 +943,7 @@ export function EditorLayout({
 
       if (willCompile) {
         saveViewPositionsBeforeBuild();
+        beginCompileTracking();
         compilingRef.current = true;
         pendingRecompileRef.current = false;
         setBuildActorName("You");
@@ -935,7 +959,15 @@ export function EditorLayout({
         // Save failed silently
       }
     },
-    [activeFileId, canEdit, project.id, saveViewPositionsBeforeBuild, startBuildPolling, withShareToken]
+    [
+      activeFileId,
+      beginCompileTracking,
+      canEdit,
+      project.id,
+      saveViewPositionsBeforeBuild,
+      startBuildPolling,
+      withShareToken,
+    ]
   );
 
   const handleEditorChange = useCallback(
@@ -999,6 +1031,7 @@ export function EditorLayout({
 
     setAiFixExplanation(null);
     saveViewPositionsBeforeBuild();
+    beginCompileTracking();
     compilingRef.current = true;
     pendingRecompileRef.current = false;
     setBuildActorName("You");
@@ -1017,12 +1050,18 @@ export function EditorLayout({
         return;
       }
 
+      const data = await res.json().catch(() => ({}));
+      if (typeof data.buildId === "string") {
+        currentBuildIdRef.current = data.buildId;
+      }
+
       startBuildPolling();
     } catch {
       setBuildStatus("error");
       resetCompileState();
     }
   }, [
+    beginCompileTracking,
     canEdit,
     project.id,
     resetCompileState,
@@ -1048,6 +1087,7 @@ export function EditorLayout({
     setBuildErrors([]);
     setPdfLoading(true);
     setCompiling(true);
+    beginCompileTracking();
     compilingRef.current = true;
     pendingRecompileRef.current = false;
     saveViewPositionsBeforeBuild();
@@ -1116,6 +1156,11 @@ export function EditorLayout({
         fetchFileContent(activeFileId);
       }
 
+      const queuedBuildId = data.compile?.result?.buildId;
+      if (typeof queuedBuildId === "string") {
+        currentBuildIdRef.current = queuedBuildId;
+      }
+
       startBuildPolling();
     } catch {
       setBuildStatus("error");
@@ -1127,6 +1172,7 @@ export function EditorLayout({
   }, [
     activeFileContent,
     activeFileId,
+    beginCompileTracking,
     canEdit,
     fetchFileContent,
     files,
@@ -1535,7 +1581,7 @@ export function EditorLayout({
               errors={buildErrors}
               actorName={buildActorName}
               onErrorClick={handleErrorClick}
-              canFixWithAi={canEdit && !shareToken && aiFixEnabled}
+              canFixWithAi={canEdit && !shareToken}
               fixingWithAi={fixingWithAi}
               onFixWithAi={handleFixWithAi}
               aiExplanation={aiFixExplanation}

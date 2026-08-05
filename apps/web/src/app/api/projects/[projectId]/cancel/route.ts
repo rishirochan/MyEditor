@@ -57,54 +57,67 @@ export async function POST(
 
     const actorUserId = access.user?.id ?? null;
     const notifyUserId = access.user?.id ?? access.project.userId;
-    const { wasQueued, wasRunning } = await requestCompileCancel(build.id);
 
-    if (wasQueued && !wasRunning) {
-      const durationMs = build.createdAt
-        ? Date.now() - build.createdAt.getTime()
-        : 0;
+    // Signal the worker / remove queued jobs. For active jobs this only sets a
+    // Redis cancel flag — the worker may still take time to abort Docker.
+    await requestCompileCancel(build.id);
 
-      const canceledPatch = {
-        status: "canceled" as const,
-        logs: "Build canceled by user.",
-        durationMs,
-        exitCode: -1,
-        completedAt: new Date(),
-      };
+    // Always mark the build canceled in the DB immediately so remount / polling
+    // cannot re-lock the Compile button if the worker never finishes.
+    const durationMs = build.createdAt
+      ? Date.now() - build.createdAt.getTime()
+      : 0;
 
-      try {
+    const canceledPatch = {
+      status: "canceled" as const,
+      logs: "Build canceled by user.",
+      durationMs,
+      exitCode: -1,
+      completedAt: new Date(),
+    };
+
+    try {
+      await db
+        .update(builds)
+        .set(canceledPatch)
+        .where(
+          and(
+            eq(builds.id, build.id),
+            inArray(builds.status, ["queued", "compiling"])
+          )
+        );
+    } catch (updateErr) {
+      if (isBuildStatusEnumValueError(updateErr)) {
+        await ensureBuildStatusEnumCompat();
         await db
           .update(builds)
           .set(canceledPatch)
-          .where(eq(builds.id, build.id));
-      } catch (updateErr) {
-        if (isBuildStatusEnumValueError(updateErr)) {
-          await ensureBuildStatusEnumCompat();
-          await db
-            .update(builds)
-            .set(canceledPatch)
-            .where(eq(builds.id, build.id));
-        } else {
-          throw updateErr;
-        }
+          .where(
+            and(
+              eq(builds.id, build.id),
+              inArray(builds.status, ["queued", "compiling"])
+            )
+          );
+      } else {
+        throw updateErr;
       }
-
-      await db
-        .update(projects)
-        .set({ updatedAt: new Date() })
-        .where(eq(projects.id, projectId));
-
-      broadcastBuildUpdate(notifyUserId, {
-        projectId,
-        buildId: build.id,
-        status: "canceled",
-        pdfUrl: null,
-        logs: "Build canceled by user.",
-        durationMs,
-        errors: [],
-        triggeredByUserId: actorUserId,
-      });
     }
+
+    await db
+      .update(projects)
+      .set({ updatedAt: new Date() })
+      .where(eq(projects.id, projectId));
+
+    broadcastBuildUpdate(notifyUserId, {
+      projectId,
+      buildId: build.id,
+      status: "canceled",
+      pdfUrl: null,
+      logs: "Build canceled by user.",
+      durationMs,
+      errors: [],
+      triggeredByUserId: actorUserId,
+    });
 
     return NextResponse.json(
       {

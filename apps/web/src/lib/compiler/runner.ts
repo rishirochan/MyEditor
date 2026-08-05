@@ -188,6 +188,12 @@ class CompileRunner {
     try {
       this.activeControllers.set(buildId, controller);
 
+      // Honor cancel that arrived before this worker picked up the job.
+      if (await this.isBuildCanceled(buildId)) {
+        await this.handleCanceledBuild(data, "Build canceled by user.");
+        return;
+      }
+
       // Watch distributed cancel flag while this build is running.
       cancelPollTimer = setInterval(() => {
         if (cancelCheckInFlight || controller.signal.aborted) return;
@@ -209,8 +215,16 @@ class CompileRunner {
           });
       }, 500);
 
-      // Step 1: Mark as compiling
-      await updateBuildStatus(buildId, "compiling");
+      // Step 1: Mark as compiling (no-op if cancel API already finalized the row)
+      const markedCompiling = await updateBuildStatus(buildId, "compiling");
+      if (!markedCompiling) {
+        // Cancel won the race — don't broadcast "compiling" or run Docker.
+        if (!controller.signal.aborted) {
+          controller.abort();
+        }
+        await this.handleCanceledBuild(data, "Build canceled by user.");
+        return;
+      }
 
       broadcastBuildUpdate(notifyUserId, {
         projectId,
@@ -287,18 +301,18 @@ class CompileRunner {
         completedAt: new Date(),
       };
 
+      // Don't overwrite a row the cancel API already finalized.
+      const nonTerminal = and(
+        eq(builds.id, buildId),
+        inArray(builds.status, ["queued", "compiling"])
+      );
+
       try {
-        await db
-          .update(builds)
-          .set(completionPatch)
-          .where(eq(builds.id, buildId));
+        await db.update(builds).set(completionPatch).where(nonTerminal);
       } catch (updateErr) {
         if (isBuildStatusEnumValueError(updateErr)) {
           await ensureBuildStatusEnumCompat();
-          await db
-            .update(builds)
-            .set(completionPatch)
-            .where(eq(builds.id, buildId));
+          await db.update(builds).set(completionPatch).where(nonTerminal);
         } else {
           throw updateErr;
         }
@@ -504,11 +518,19 @@ async function copyDir(src: string, dest: string): Promise<void> {
 async function updateBuildStatus(
   buildId: string,
   status: "queued" | "compiling"
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const updated = await db
     .update(builds)
     .set({ status })
-    .where(eq(builds.id, buildId));
+    .where(
+      and(
+        eq(builds.id, buildId),
+        inArray(builds.status, ["queued", "compiling"])
+      )
+    )
+    .returning({ id: builds.id });
+
+  return updated.length > 0;
 }
 
 async function updateBuildError(

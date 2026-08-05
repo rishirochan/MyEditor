@@ -202,6 +202,38 @@ export async function detectEngine(
  * Timeout is enforced via JS setTimeout + container.kill().
  * The container is always removed after use.
  */
+/**
+ * Best-effort container stop. Never block the worker concurrency slot forever
+ * if Docker kill/wait hangs after a user cancel or timeout.
+ */
+async function forceStopContainer(
+  container: Docker.Container,
+  reason: "cancel" | "timeout"
+): Promise<void> {
+  const STOP_TIMEOUT_MS = 8_000;
+  const id = container.id.slice(0, 12);
+
+  try {
+    await Promise.race([
+      container.kill().catch(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, STOP_TIMEOUT_MS)),
+    ]);
+  } catch {
+    // Container may have already exited
+  }
+
+  try {
+    await Promise.race([
+      container.wait().then(() => undefined).catch(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, STOP_TIMEOUT_MS)),
+    ]);
+  } catch {
+    // Ignore errors if already stopped
+  }
+
+  console.warn(`[Docker] Container ${id} force-stop finished (${reason})`);
+}
+
 export async function runCompileContainer(
   options: CompileContainerOptions
 ): Promise<CompileContainerResult> {
@@ -300,29 +332,12 @@ export async function runCompileContainer(
       canceled = true;
       exitCode = -1;
       console.warn(`[Docker] Container ${container.id.slice(0, 12)} canceled by user`);
-      try {
-        await container.kill();
-      } catch {
-        // Container may have already exited
-      }
-      try {
-        await container.wait();
-      } catch {
-        // Ignore errors if already stopped
-      }
+      await forceStopContainer(container, "cancel");
     } else if (race === "timeout") {
       timedOut = true;
+      exitCode = -1;
       console.warn(`[Docker] Container ${container.id.slice(0, 12)} timed out after ${COMPILE_TIMEOUT}s`);
-      try {
-        await container.kill();
-      } catch {
-        // Container may have already exited
-      }
-      try {
-        await container.wait();
-      } catch {
-        // Ignore errors if already stopped
-      }
+      await forceStopContainer(container, "timeout");
     } else {
       exitCode = race.StatusCode;
       console.log(`[Docker] Container ${container.id.slice(0, 12)} exited with code ${exitCode}`);
