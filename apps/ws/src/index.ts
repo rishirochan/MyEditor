@@ -120,7 +120,11 @@ function nextColor(): string {
 
 // ─── Database ──────────────────────────────────────
 
-const sql = postgres(DATABASE_URL);
+const sql = postgres(DATABASE_URL, {
+  max: Number(process.env.DB_POOL_MAX || 5),
+  idle_timeout: 20,
+  max_lifetime: 60 * 30,
+});
 
 /**
  * Validates a session token against the database.
