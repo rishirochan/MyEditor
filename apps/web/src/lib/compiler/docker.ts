@@ -36,7 +36,10 @@ const COMPILE_CPUS = parseFloat(
 );
 
 const STORAGE_PATH = process.env.STORAGE_PATH || "/data";
-const PROJECTS_VOLUME = process.env.PROJECTS_VOLUME || "backslash-project-data";
+// Compose sets PROJECTS_VOLUME, so containers share the named volume. Unset
+// means a host-run worker (local dev): bind-mount its storage dir instead, or
+// the compile container starts on an empty volume and sees no project files.
+const PROJECTS_VOLUME = process.env.PROJECTS_VOLUME || null;
 
 // ─── Types ─────────────────────────────────────────
 
@@ -286,12 +289,19 @@ export async function runCompileContainer(
       NetworkDisabled: true,
       HostConfig: {
         Mounts: [
-          {
-            Type: "volume" as const,
-            Source: PROJECTS_VOLUME,
-            Target: STORAGE_PATH,
-            ReadOnly: false,
-          },
+          PROJECTS_VOLUME
+            ? {
+                Type: "volume" as const,
+                Source: PROJECTS_VOLUME,
+                Target: STORAGE_PATH,
+                ReadOnly: false,
+              }
+            : {
+                Type: "bind" as const,
+                Source: STORAGE_PATH,
+                Target: STORAGE_PATH,
+                ReadOnly: false,
+              },
         ],
         Memory: memoryBytes,
         NanoCpus: nanoCpus,

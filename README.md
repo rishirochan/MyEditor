@@ -377,7 +377,7 @@ Create `apps/web/.env`:
 ```env
 DATABASE_URL=postgresql://backslash:devpassword@localhost:5432/backslash
 REDIS_URL=redis://localhost:6379
-STORAGE_PATH=./data
+STORAGE_PATH=/absolute/path/to/MyEditor/data
 TEMPLATES_PATH=../../templates
 COMPILER_IMAGE=myeditor-compiler
 SESSION_SECRET=dev-secret-change-in-production
@@ -393,15 +393,22 @@ REDIS_URL=redis://localhost:6379
 SESSION_SECRET=dev-secret-change-in-production
 ```
 
-And the compile worker needs the same storage paths as the web app (absolute paths — the worker mounts them into compile containers):
+And the compile worker. It loads the web app's compile runner, so it needs the
+database too, and its `STORAGE_PATH` must be the **same absolute path** the web
+app uses — the worker bind-mounts that directory into each compile container, so
+a mismatch means the container cannot see the project files:
 
 ```env
 # apps/worker/.env
+DATABASE_URL=postgresql://backslash:devpassword@localhost:5432/backslash
 REDIS_URL=redis://localhost:6379
 STORAGE_PATH=/absolute/path/to/MyEditor/data
 TEMPLATES_PATH=/absolute/path/to/MyEditor/templates
 COMPILER_IMAGE=myeditor-compiler
 ```
+
+Local dev needs Docker Desktop (or Colima) with file sharing enabled for that
+directory. On Windows, use WSL2 — the compile path assumes a POSIX Docker socket.
 
 **3. One-time setup** (installs deps, builds the compiler image, starts Postgres + Redis, pushes the schema):
 
@@ -415,9 +422,9 @@ pnpm setup
 pnpm dev
 ```
 
-That one command starts Postgres + Redis (waits until healthy) and then runs the web app, WebSocket server, and compile worker in parallel with prefixed logs. `Ctrl+C` stops all three; `pnpm stop` also shuts down the containers.
+That one command starts Postgres + Redis (waits until healthy) and then runs the web app, WebSocket server, and compile worker in parallel with prefixed logs. `Ctrl+C` stops those three processes; Postgres and Redis keep running in the background until you run `pnpm stop`.
 
-If one of the three exits with an error, pnpm stops the other two — just rerun `pnpm dev`. To iterate on a single app, run it on its own in a second terminal (for example `pnpm --filter @myeditor/worker dev`). The dev containers are pinned to the `myeditor` Compose project, so they are shared rather than duplicated when you run from a git worktree or a second clone.
+If one of the three exits with an error, pnpm stops the other two — just rerun `pnpm dev`. To iterate on a single app, run it on its own in a second terminal (for example `pnpm --filter @myeditor/worker dev`). The dev containers are pinned to the `myeditor-dev` Compose project, so they are shared rather than duplicated when you run from a git worktree or a second clone — and kept separate from the production stack, which uses `myeditor`.
 
 If you prefer compile execution inside the web process during local development, set `RUN_COMPILE_RUNNER_IN_WEB=true` and run `pnpm --filter '!@myeditor/worker' -r --parallel dev` instead.
 
