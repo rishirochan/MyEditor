@@ -83,6 +83,28 @@ async function moveTrackingTableOutOfPublic(client) {
   if (!(await tableExists(client, "__drizzle_migrations"))) return;
 
   await client.unsafe(`CREATE SCHEMA IF NOT EXISTS drizzle`);
+
+  // Merging two histories that disagree would let the runtime skip or replay
+  // migrations depending on which created_at wins. Only merge when the
+  // destination is empty or already identical; otherwise stop and keep both.
+  const [publicHashes, drizzleHashes] = await Promise.all([
+    client`SELECT hash FROM public.__drizzle_migrations ORDER BY hash`,
+    client`SELECT hash FROM drizzle.__drizzle_migrations ORDER BY hash`,
+  ]);
+  if (drizzleHashes.length > 0) {
+    const a = publicHashes.map((row) => row.hash).join(",");
+    const b = drizzleHashes.map((row) => row.hash).join(",");
+    if (a !== b) {
+      throw fatal(
+        "Both public.__drizzle_migrations and drizzle.__drizzle_migrations " +
+          `exist with different histories (${publicHashes.length} vs ` +
+          `${drizzleHashes.length} rows). Refusing to merge them automatically. ` +
+          "Inspect both tables, keep the one that matches the real schema, and " +
+          "drop the other."
+      );
+    }
+  }
+
   await client.unsafe(`
     INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
     SELECT hash, created_at FROM public.__drizzle_migrations
@@ -122,9 +144,11 @@ async function baselineIfNeeded(client, migrationsFolder) {
   if (!(await tableExists(client, "users"))) return; // fresh DB: migrate() builds it
 
   const baseline = process.env.DRIZZLE_BASELINE;
+  const tracked = await client`SELECT 1 FROM drizzle.__drizzle_migrations LIMIT 1`;
+  const hasHistory = tracked.length > 0;
+
   if (!baseline) {
-    const tracked = await client`SELECT 1 FROM drizzle.__drizzle_migrations LIMIT 1`;
-    if (tracked.length > 0) return;
+    if (hasHistory) return;
 
     throw fatal(
       "Database has application tables but no migration history. Re-run with " +
@@ -139,6 +163,18 @@ async function baselineIfNeeded(client, migrationsFolder) {
     throw fatal("Migration journal is empty");
   }
 
+  // "latest" is a moving target. Left set in a deploy environment it would mark
+  // each future migration as applied without ever running its SQL, so it is
+  // only accepted for the one case it is meant for: adopting a database that
+  // has no history at all. Repairs must name an immutable tag.
+  if (baseline === "latest" && hasHistory) {
+    throw fatal(
+      "DRIZZLE_BASELINE=latest is only allowed on a database with no migration " +
+        "history. This one already has some. Re-run with the exact tag you mean, " +
+        `e.g. DRIZZLE_BASELINE=${entries[entries.length - 1].tag}.`
+    );
+  }
+
   const upTo =
     baseline === "latest"
       ? entries.length - 1
@@ -151,14 +187,18 @@ async function baselineIfNeeded(client, migrationsFolder) {
     );
   }
 
-  for (const entry of entries.slice(0, upTo + 1)) {
-    const sqlPath = path.join(migrationsFolder, `${entry.tag}.sql`);
-    if (!fs.existsSync(sqlPath)) continue;
-    const hash = sha256File(sqlPath);
-    if (await hasMigrationHash(client, hash)) continue;
-    await insertMigrationHash(client, hash, Number(entry.when ?? Date.now()));
-    console.log(`[migrate] Baseline recorded for ${entry.tag}`);
-  }
+  // One transaction: a half-written baseline looks like "some history" on the
+  // next run, which would silently skip the rest.
+  await client.begin(async (tx) => {
+    for (const entry of entries.slice(0, upTo + 1)) {
+      const sqlPath = path.join(migrationsFolder, `${entry.tag}.sql`);
+      if (!fs.existsSync(sqlPath)) continue;
+      const hash = sha256File(sqlPath);
+      if (await hasMigrationHash(tx, hash)) continue;
+      await insertMigrationHash(tx, hash, Number(entry.when ?? Date.now()));
+      console.log(`[migrate] Baseline recorded for ${entry.tag}`);
+    }
+  });
 }
 
 /** An error retrying cannot fix — stop the attempt loop immediately. */
@@ -168,6 +208,17 @@ function fatal(message) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function positiveInt(raw, fallback) {
+  const value = Number(raw ?? fallback);
+  if (!Number.isFinite(value) || value < 1) {
+    if (raw !== undefined) {
+      console.warn(`[migrate] Ignoring invalid value "${raw}", using ${fallback}`);
+    }
+    return fallback;
+  }
+  return Math.floor(value);
 }
 
 async function main() {
@@ -180,9 +231,12 @@ async function main() {
 
   console.log(`[migrate] Using migrations from: ${migrationsFolder}`);
 
-  const maxAttempts = Number(process.env.MIGRATE_MAX_ATTEMPTS ?? "30");
-  const retryDelaySeconds = Number(
-    process.env.MIGRATE_RETRY_DELAY_SECONDS ?? "2"
+  // A bad value here must not skip the loop entirely and exit 0 having migrated
+  // nothing, which is what Number("x") <= 0 would do.
+  const maxAttempts = positiveInt(process.env.MIGRATE_MAX_ATTEMPTS, 30);
+  const retryDelaySeconds = positiveInt(
+    process.env.MIGRATE_RETRY_DELAY_SECONDS,
+    2
   );
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
