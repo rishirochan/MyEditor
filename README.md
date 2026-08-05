@@ -363,20 +363,14 @@ myeditor/
 
 If you want to contribute or run MyEditor locally for development:
 
-**1. Clone and install:**
+**1. Clone:**
 
 ```bash
 git clone https://github.com/rishirochan/MyEditor.git
 cd MyEditor
 ```
 
-**2. Start dev services (PostgreSQL + Redis):**
-
-```bash
-docker compose -f docker-compose.dev.yml up -d
-```
-
-**3. Set up environment variables:**
+**2. Set up environment variables:**
 
 Create `apps/web/.env`:
 
@@ -390,7 +384,7 @@ SESSION_SECRET=dev-secret-change-in-production
 RUN_COMPILE_RUNNER_IN_WEB=false
 ```
 
-If you run the standalone WebSocket server in dev, use the same session secret:
+The WebSocket server needs the same session secret:
 
 ```env
 # apps/ws/.env
@@ -399,29 +393,40 @@ REDIS_URL=redis://localhost:6379
 SESSION_SECRET=dev-secret-change-in-production
 ```
 
-**4. Push the database schema:**
+And the compile worker needs the same storage paths as the web app (absolute paths — the worker mounts them into compile containers):
 
-```bash
-cd apps/web && pnpm db:push
+```env
+# apps/worker/.env
+REDIS_URL=redis://localhost:6379
+STORAGE_PATH=/absolute/path/to/MyEditor/data
+TEMPLATES_PATH=/absolute/path/to/MyEditor/templates
+COMPILER_IMAGE=myeditor-compiler
 ```
 
-**5. Build the compiler Docker image:**
+**3. One-time setup** (installs deps, builds the compiler image, starts Postgres + Redis, pushes the schema):
 
 ```bash
-docker compose build compiler-image
+pnpm setup
 ```
 
-**6. Start app services (separate terminals):**
+**4. Start everything:**
 
 ```bash
-cd apps/web && pnpm dev
-cd apps/ws && pnpm dev
-cd apps/worker && pnpm dev
+pnpm dev
 ```
 
-If you prefer compile execution inside the web process during local development, set `RUN_COMPILE_RUNNER_IN_WEB=true` and skip `apps/worker`.
+That one command starts Postgres + Redis (waits until healthy) and then runs the web app, WebSocket server, and compile worker in parallel with prefixed logs. `Ctrl+C` stops all three; `pnpm stop` also shuts down the containers.
 
-**7.** Open [http://localhost:3000](http://localhost:3000)
+If you prefer compile execution inside the web process during local development, set `RUN_COMPILE_RUNNER_IN_WEB=true` and run `pnpm --filter '!@myeditor/worker' -r --parallel dev` instead.
+
+**5.** Open [http://localhost:3000](http://localhost:3000)
+
+| Script | What it does |
+|---|---|
+| `pnpm dev` | Dev services + web + ws + worker, one terminal |
+| `pnpm setup` | One-time: install, build compiler image, start services, push schema |
+| `pnpm services` | Just Postgres + Redis (`-d`, waits for healthy) |
+| `pnpm stop` | Stop the dev containers |
 
 ---
 
