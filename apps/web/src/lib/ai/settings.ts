@@ -8,6 +8,12 @@ import type {
   UserAiSettings,
 } from "@/lib/ai/types";
 import { isCliProvider } from "@/lib/ai/types";
+import {
+  CLAUDE_LATEST_FAMILY,
+  CODEX_LATEST_FALLBACK,
+  EFFORT_DESCRIPTIONS,
+  normalizeEffort,
+} from "@/lib/ai/cliModelCatalog";
 import { eq } from "drizzle-orm";
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secrets";
 
@@ -84,12 +90,14 @@ export function defaultAiSettings(): UserAiSettings {
     buildFix: {
       provider: defaultProvider,
       model: defaultModelFor(defaultProvider, "buildFix"),
+      effort: null,
       endpoint: null,
       apiKey: null,
     },
     latexWriter: {
       provider: defaultProvider,
       model: defaultModelFor(defaultProvider, "latexWriter"),
+      effort: null,
       endpoint: null,
       apiKey: null,
     },
@@ -97,6 +105,24 @@ export function defaultAiSettings(): UserAiSettings {
 }
 
 type UserAiSettingsRow = typeof userAiSettings.$inferSelect;
+
+function normalizeCliEffort(
+  provider: AiProvider,
+  model: string,
+  effort: string | null | undefined
+): string | null {
+  if (!isCliProvider(provider)) return null;
+
+  const catalog =
+    provider === "claude-cli" ? CLAUDE_LATEST_FAMILY : CODEX_LATEST_FALLBACK;
+  if (!catalog.some((option) => option.id === model)) {
+    // Live/legacy model we have no effort list for: keep it only if it is a
+    // known level, or the CLI rejects every request with an opaque failure.
+    const trimmed = normalizeNullable(effort);
+    return trimmed && trimmed in EFFORT_DESCRIPTIONS ? trimmed : null;
+  }
+  return normalizeEffort(effort, catalog, model);
+}
 
 function rowToSettings(row: UserAiSettingsRow | null): UserAiSettings {
   const defaults = defaultAiSettings();
@@ -114,12 +140,23 @@ function rowToSettings(row: UserAiSettingsRow | null): UserAiSettings {
     buildFix: {
       provider: buildProvider,
       model: row.buildModel?.trim() || defaultModelFor(buildProvider, "buildFix"),
+      effort: normalizeCliEffort(
+        buildProvider,
+        row.buildModel?.trim() || defaultModelFor(buildProvider, "buildFix"),
+        row.buildEffort
+      ),
       endpoint: normalizeNullable(row.buildEndpoint),
       apiKey: decryptStoredApiKey(row.buildApiKey),
     },
     latexWriter: {
       provider: writerProvider,
       model: row.writerModel?.trim() || defaultModelFor(writerProvider, "latexWriter"),
+      effort: normalizeCliEffort(
+        writerProvider,
+        row.writerModel?.trim() ||
+          defaultModelFor(writerProvider, "latexWriter"),
+        row.writerEffort
+      ),
       endpoint: normalizeNullable(row.writerEndpoint),
       apiKey: decryptStoredApiKey(row.writerApiKey),
     },
@@ -157,10 +194,20 @@ export async function upsertUserAiSettings(
       aiEnabled: true,
       buildProvider: settings.buildFix.provider,
       buildModel: settings.buildFix.model,
+      buildEffort: normalizeCliEffort(
+        settings.buildFix.provider,
+        settings.buildFix.model,
+        settings.buildFix.effort
+      ),
       buildEndpoint: normalizeNullable(settings.buildFix.endpoint),
       buildApiKey: encryptedBuildKey,
       writerProvider: settings.latexWriter.provider,
       writerModel: settings.latexWriter.model,
+      writerEffort: normalizeCliEffort(
+        settings.latexWriter.provider,
+        settings.latexWriter.model,
+        settings.latexWriter.effort
+      ),
       writerEndpoint: normalizeNullable(settings.latexWriter.endpoint),
       writerApiKey: encryptedWriterKey,
       updatedAt: new Date(),
@@ -171,10 +218,20 @@ export async function upsertUserAiSettings(
         aiEnabled: true,
         buildProvider: settings.buildFix.provider,
         buildModel: settings.buildFix.model,
+        buildEffort: normalizeCliEffort(
+          settings.buildFix.provider,
+          settings.buildFix.model,
+          settings.buildFix.effort
+        ),
         buildEndpoint: normalizeNullable(settings.buildFix.endpoint),
         buildApiKey: encryptedBuildKey,
         writerProvider: settings.latexWriter.provider,
         writerModel: settings.latexWriter.model,
+        writerEffort: normalizeCliEffort(
+          settings.latexWriter.provider,
+          settings.latexWriter.model,
+          settings.latexWriter.effort
+        ),
         writerEndpoint: normalizeNullable(settings.latexWriter.endpoint),
         writerApiKey: encryptedWriterKey,
         updatedAt: new Date(),
@@ -191,6 +248,7 @@ export function toPublicAiSettings(settings: UserAiSettings): PublicUserAiSettin
     buildFix: {
       provider: settings.buildFix.provider,
       model: settings.buildFix.model,
+      effort: settings.buildFix.effort,
       endpoint: settings.buildFix.endpoint,
       apiKeySet: isCliProvider(settings.buildFix.provider)
         ? false
@@ -199,6 +257,7 @@ export function toPublicAiSettings(settings: UserAiSettings): PublicUserAiSettin
     latexWriter: {
       provider: settings.latexWriter.provider,
       model: settings.latexWriter.model,
+      effort: settings.latexWriter.effort,
       endpoint: settings.latexWriter.endpoint,
       apiKeySet: isCliProvider(settings.latexWriter.provider)
         ? false

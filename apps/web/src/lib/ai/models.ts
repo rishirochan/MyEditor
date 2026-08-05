@@ -19,24 +19,10 @@ export const MODEL_OPTIONS: Record<
     "google/gemini-2.0-flash-001",
     "meta-llama/llama-3.3-70b-instruct",
   ],
-  // CLI lists are loaded live from the installed CLIs; these are offline fallbacks.
-  "claude-cli": [
-    "sonnet",
-    "opus",
-    "haiku",
-    "fable",
-    "claude-sonnet-4-6",
-    "claude-opus-4-6",
-    "claude-fable-5",
-  ],
-  "codex-cli": [
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-  ],
+  // CLI lists are loaded live from the installed CLIs; these are offline fallbacks
+  // for the latest model family only.
+  "claude-cli": ["opus", "sonnet", "haiku"],
+  "codex-cli": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
 };
 
 export function defaultModelForProvider(provider: AiProvider): string {

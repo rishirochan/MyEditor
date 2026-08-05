@@ -19,6 +19,10 @@ import {
 } from "@/lib/ai/models";
 import type { AiProvider } from "@/lib/ai/types";
 import { isCliProvider } from "@/lib/ai/types";
+import {
+  CLAUDE_LATEST_FAMILY,
+  CODEX_LATEST_FALLBACK,
+} from "@/lib/ai/cliModelCatalog";
 
 interface UserInfo {
   id: string;
@@ -30,6 +34,7 @@ interface UserInfo {
 interface AiModelFormState {
   provider: AiProvider;
   model: string;
+  effort: string | null;
   endpoint: string;
   apiKey: string;
   apiKeySet: boolean;
@@ -41,21 +46,30 @@ interface AiSettingsResponse {
     buildFix: {
       provider: AiProvider;
       model: string;
+      effort: string | null;
       endpoint: string | null;
       apiKeySet: boolean;
     };
     latexWriter: {
       provider: AiProvider;
       model: string;
+      effort: string | null;
       endpoint: string | null;
       apiKeySet: boolean;
     };
   };
 }
 
+interface CliReasoningLevel {
+  effort: string;
+  description?: string;
+}
+
 interface CliModelOption {
   id: string;
   label: string;
+  defaultEffort?: string;
+  efforts?: CliReasoningLevel[];
 }
 
 interface CliProviderStatus {
@@ -79,13 +93,13 @@ interface CliStatusResponse {
 }
 
 function defaultAiModelState(): AiModelFormState {
-  return {
-    provider: "openai",
-    model: "gpt-4o-mini",
-    endpoint: "",
-    apiKey: "",
+  return normalizeCliOnlyModelState({
+    provider: "claude-cli",
+    model: defaultModelForProvider("claude-cli"),
+    effort: null,
+    endpoint: null,
     apiKeySet: false,
-  };
+  });
 }
 
 function providerLabel(provider: AiProvider): string {
@@ -106,15 +120,90 @@ function providerLabel(provider: AiProvider): string {
   }
 }
 
+function effortLabel(effort: string): string {
+  switch (effort) {
+    case "low":
+      return "Low";
+    case "medium":
+      return "Med";
+    case "high":
+      return "High";
+    case "xhigh":
+      return "XHigh";
+    case "max":
+      return "Max";
+    case "ultra":
+      return "Ultra";
+    default:
+      return effort;
+  }
+}
+
+function resolveEffortForModel(
+  models: CliModelOption[] | null | undefined,
+  modelId: string,
+  preferred?: string | null
+): string | null {
+  const match = models?.find((option) => option.id === modelId);
+  const efforts = match?.efforts ?? [];
+  if (efforts.length === 0) return null;
+  if (preferred && efforts.some((level) => level.effort === preferred)) {
+    return preferred;
+  }
+  return match?.defaultEffort ?? efforts[0]?.effort ?? null;
+}
+
+/** Live CLI list when we have one, else the compiled-in fallback. */
+function cliOptionsFor(
+  provider: AiProvider,
+  cliModels?: CliStatusResponse["status"]["models"] | null
+): CliModelOption[] {
+  const live =
+    provider === "claude-cli" ? cliModels?.claude : cliModels?.codex;
+  if (live && live.length > 0) return live;
+  return provider === "claude-cli" ? CLAUDE_LATEST_FAMILY : CODEX_LATEST_FALLBACK;
+}
+
+function normalizeCliOnlyModelState(
+  settings: AiSettingsResponse["settings"]["buildFix"],
+  cliModels?: CliStatusResponse["status"]["models"] | null
+): AiModelFormState {
+  const provider = isCliProvider(settings.provider)
+    ? settings.provider
+    : "claude-cli";
+  // Validate against the live list too, or a model the CLI just shipped gets
+  // silently rewritten back to the hardcoded default after save.
+  const models = cliOptionsFor(provider, cliModels);
+  const requestedModel = isCliProvider(settings.provider)
+    ? settings.model.trim()
+    : defaultModelForProvider(provider);
+  const model = models.some((option) => option.id === requestedModel)
+    ? requestedModel
+    : defaultModelForProvider(provider);
+
+  return {
+    provider,
+    model,
+    effort: resolveEffortForModel(models, model, settings.effort),
+    endpoint: "",
+    apiKey: "",
+    apiKeySet: false,
+  };
+}
+
 function AiModelField({
   provider,
   model,
+  effort,
   onModelChange,
+  onEffortChange,
   cliModels,
 }: {
   provider: AiProvider;
   model: string;
-  onModelChange: (model: string) => void;
+  effort: string | null;
+  onModelChange: (model: string, effort: string | null) => void;
+  onEffortChange: (effort: string) => void;
   cliModels: CliStatusResponse["status"]["models"] | null;
 }) {
   if (provider === "custom") {
@@ -122,7 +211,7 @@ function AiModelField({
       <input
         type="text"
         value={model}
-        onChange={(e) => onModelChange(e.target.value)}
+        onChange={(e) => onModelChange(e.target.value, null)}
         required
         className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
         placeholder={defaultModelForProvider(provider)}
@@ -130,37 +219,91 @@ function AiModelField({
     );
   }
 
-  const liveOptions =
-    provider === "claude-cli"
-      ? cliModels?.claude
-      : provider === "codex-cli"
-        ? cliModels?.codex
-        : null;
+  const options: CliModelOption[] = isCliProvider(provider)
+    ? cliOptionsFor(provider, cliModels)
+    : modelsForProvider(provider, undefined).map((id) => ({ id, label: id }));
 
-  const options =
-    liveOptions && liveOptions.length > 0
-      ? (() => {
-          const ids = liveOptions.map((option) => option.id);
-          if (model.trim() && !ids.includes(model.trim())) {
-            return [{ id: model.trim(), label: model.trim() }, ...liveOptions];
-          }
-          return liveOptions;
-        })()
-      : modelsForProvider(provider, model).map((id) => ({ id, label: id }));
+  // Keep API-key providers tolerant of custom saved model IDs; CLI providers
+  // stay on the latest family only.
+  const selectOptions: CliModelOption[] =
+    !isCliProvider(provider) &&
+    model.trim() &&
+    !options.some((option) => option.id === model.trim())
+      ? [{ id: model.trim(), label: model.trim() }, ...options]
+      : options;
+
+  const effectiveModel =
+    isCliProvider(provider) &&
+    model.trim() &&
+    !selectOptions.some((option) => option.id === model.trim())
+      ? selectOptions[0]?.id || model
+      : model;
+
+  const selected = selectOptions.find((option) => option.id === effectiveModel);
+  const efforts = selected?.efforts ?? [];
+  const activeEffort =
+    (effort && efforts.some((level) => level.effort === effort)
+      ? effort
+      : selected?.defaultEffort) ??
+    efforts[0]?.effort ??
+    null;
 
   return (
-    <Select value={model} onValueChange={onModelChange}>
-      <SelectTrigger className="w-full bg-bg-primary">
-        <SelectValue placeholder="Select model" />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((option) => (
-          <SelectItem key={option.id} value={option.id}>
-            {option.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className="space-y-3">
+      <Select
+        value={effectiveModel}
+        onValueChange={(value) => {
+          const nextEffort = resolveEffortForModel(selectOptions, value, effort);
+          onModelChange(value, nextEffort);
+        }}
+      >
+        <SelectTrigger className="w-full bg-bg-primary">
+          <SelectValue placeholder="Select model" />
+        </SelectTrigger>
+        <SelectContent>
+          {selectOptions.map((option) => (
+            <SelectItem key={option.id} value={option.id}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {isCliProvider(provider) && efforts.length > 0 && (
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-text-muted">
+            Intelligence
+          </label>
+          <div
+            role="radiogroup"
+            aria-label="Intelligence level"
+            className="flex flex-wrap gap-1 rounded-lg border border-border bg-bg-primary p-1"
+          >
+            {efforts.map((level) => {
+              const selectedEffort = level.effort === activeEffort;
+              return (
+                <button
+                  key={level.effort}
+                  type="button"
+                  role="radio"
+                  aria-checked={selectedEffort}
+                  title={level.description || effortLabel(level.effort)}
+                  onClick={() => onEffortChange(level.effort)}
+                  className={cn(
+                    "min-w-[3.25rem] flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                    selectedEffort
+                      ? "bg-accent text-white"
+                      : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                  )}
+                >
+                  {effortLabel(level.effort)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -197,7 +340,10 @@ export default function SettingsPage() {
   const refreshCliStatus = useCallback(async () => {
     setCliStatusLoading(true);
     try {
-      const res = await fetch("/api/ai/cli-status", { cache: "no-store" });
+      const res = await fetch("/api/ai/cli-status", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
+      });
       if (!res.ok) {
         setCliMessage("Failed to detect local CLI status");
         return;
@@ -213,12 +359,40 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    if (!cliStatus?.models) return;
+
+    function snapCliSelection(prev: AiModelFormState): AiModelFormState {
+      if (!isCliProvider(prev.provider)) return prev;
+      const models =
+        prev.provider === "claude-cli"
+          ? cliStatus!.models.claude
+          : cliStatus!.models.codex;
+      if (!models.length) return prev;
+      const nextModel = models.some((option) => option.id === prev.model)
+        ? prev.model
+        : models[0]!.id;
+      const nextEffort = resolveEffortForModel(models, nextModel, prev.effort);
+      if (nextModel === prev.model && nextEffort === prev.effort) return prev;
+      return { ...prev, model: nextModel, effort: nextEffort };
+    }
+
+    setBuildFixModel(snapCliSelection);
+    setLatexWriterModel(snapCliSelection);
+  }, [cliStatus]);
+
+  useEffect(() => {
     async function loadSettings() {
       try {
         const [userRes, aiRes] = await Promise.all([
           fetch("/api/auth/me", { cache: "no-store" }),
           fetch("/api/ai/settings", { cache: "no-store" }),
         ]);
+
+        if (userRes.status === 401) {
+          const redirect = encodeURIComponent("/dashboard/settings");
+          window.location.href = `/login?redirect=${redirect}`;
+          return;
+        }
 
         if (userRes.ok) {
           const userData = await userRes.json();
@@ -229,23 +403,20 @@ export default function SettingsPage() {
 
         if (aiRes.ok) {
           const aiData = (await aiRes.json()) as AiSettingsResponse;
-          setBuildFixModel({
-            provider: aiData.settings.buildFix.provider,
-            model: aiData.settings.buildFix.model,
-            endpoint: aiData.settings.buildFix.endpoint ?? "",
-            apiKey: "",
-            apiKeySet: aiData.settings.buildFix.apiKeySet,
-          });
-          setLatexWriterModel({
-            provider: aiData.settings.latexWriter.provider,
-            model: aiData.settings.latexWriter.model,
-            endpoint: aiData.settings.latexWriter.endpoint ?? "",
-            apiKey: "",
-            apiKeySet: aiData.settings.latexWriter.apiKeySet,
-          });
+          // cliStatus is still null here; the snapCliSelection effect re-runs
+          // once the live list arrives.
+          setBuildFixModel(
+            normalizeCliOnlyModelState(aiData.settings.buildFix)
+          );
+          setLatexWriterModel(
+            normalizeCliOnlyModelState(aiData.settings.latexWriter)
+          );
+        } else if (aiRes.status !== 401) {
+          setAiError("Failed to load AI settings");
         }
 
-        await refreshCliStatus();
+        // Don't block first paint on local CLI probing (can be slow / hang some browsers).
+        void refreshCliStatus();
       } catch {
         setProfileError("Failed to load settings");
       } finally {
@@ -288,17 +459,21 @@ export default function SettingsPage() {
     purpose: "buildFix" | "latexWriter",
     provider: AiProvider
   ) {
-    const liveDefault =
-      provider === "claude-cli"
-        ? cliStatus?.models.claude[0]?.id
-        : provider === "codex-cli"
-          ? cliStatus?.models.codex[0]?.id
-          : null;
+    // Resolve against the same list AiModelField renders from, or the UI shows
+    // one effort while state holds another.
+    const options = isCliProvider(provider)
+      ? cliOptionsFor(provider, cliStatus?.models)
+      : null;
+    const nextModel = options?.[0]?.id || defaultModelForProvider(provider);
+    const nextEffort = options
+      ? resolveEffortForModel(options, nextModel)
+      : null;
 
     const updater = (prev: AiModelFormState): AiModelFormState => ({
       ...prev,
       provider,
-      model: liveDefault || defaultModelForProvider(provider),
+      model: nextModel,
+      effort: nextEffort,
       endpoint: isCliProvider(provider) ? "" : prev.endpoint,
       apiKey: isCliProvider(provider) ? "" : prev.apiKey,
     });
@@ -376,11 +551,17 @@ export default function SettingsPage() {
       const buildFixPayload: Record<string, unknown> = {
         provider: buildFixModel.provider,
         model: buildFixModel.model.trim(),
+        effort: isCliProvider(buildFixModel.provider)
+          ? buildFixModel.effort
+          : null,
         endpoint: buildFixModel.endpoint.trim() || null,
       };
       const latexWriterPayload: Record<string, unknown> = {
         provider: latexWriterModel.provider,
         model: latexWriterModel.model.trim(),
+        effort: isCliProvider(latexWriterModel.provider)
+          ? latexWriterModel.effort
+          : null,
         endpoint: latexWriterModel.endpoint.trim() || null,
       };
 
@@ -394,8 +575,9 @@ export default function SettingsPage() {
       const res = await fetch("/api/ai/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        // No `enabled` key: this form only edits models, so the server keeps
+        // whatever the user set elsewhere.
         body: JSON.stringify({
-          enabled: true,
           buildFix: buildFixPayload,
           latexWriter: latexWriterPayload,
         }),
@@ -408,22 +590,9 @@ export default function SettingsPage() {
       }
 
       const saved = payload.settings as AiSettingsResponse["settings"];
-      setBuildFixModel((prev) => ({
-        ...prev,
-        provider: saved.buildFix.provider,
-        model: saved.buildFix.model,
-        endpoint: saved.buildFix.endpoint ?? "",
-        apiKey: "",
-        apiKeySet: saved.buildFix.apiKeySet,
-      }));
-      setLatexWriterModel((prev) => ({
-        ...prev,
-        provider: saved.latexWriter.provider,
-        model: saved.latexWriter.model,
-        endpoint: saved.latexWriter.endpoint ?? "",
-        apiKey: "",
-        apiKeySet: saved.latexWriter.apiKeySet,
-      }));
+      const models = cliStatus?.models ?? null;
+      setBuildFixModel(normalizeCliOnlyModelState(saved.buildFix, models));
+      setLatexWriterModel(normalizeCliOnlyModelState(saved.latexWriter, models));
 
       setAiSuccess("AI settings saved successfully");
       setTimeout(() => setAiSuccess(""), 3000);
@@ -445,12 +614,12 @@ export default function SettingsPage() {
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center py-24">
-        <p className="text-text-secondary">Unable to load settings.</p>
+        <p className="text-text-secondary">Redirecting to sign in…</p>
         <Link
-          href="/dashboard"
+          href="/login?redirect=%2Fdashboard%2Fsettings"
           className="mt-4 text-sm text-accent hover:text-accent-hover transition-colors"
         >
-          ← Back to Dashboard
+          Continue to sign in
         </Link>
       </div>
     );
@@ -706,10 +875,6 @@ export default function SettingsPage() {
                     <SelectValue placeholder="Select provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                    <SelectItem value="openrouter">OpenRouter</SelectItem>
-                    <SelectItem value="anthropic">Anthropic</SelectItem>
-                    <SelectItem value="custom">Custom endpoint</SelectItem>
                     <SelectItem value="claude-cli">
                       Claude CLI (subscription)
                     </SelectItem>
@@ -727,9 +892,17 @@ export default function SettingsPage() {
                 <AiModelField
                   provider={buildFixModel.provider}
                   model={buildFixModel.model}
+                  effort={buildFixModel.effort}
                   cliModels={cliStatus?.models ?? null}
-                  onModelChange={(value) =>
-                    setBuildFixModel((prev) => ({ ...prev, model: value }))
+                  onModelChange={(value, nextEffort) =>
+                    setBuildFixModel((prev) => ({
+                      ...prev,
+                      model: value,
+                      effort: nextEffort,
+                    }))
+                  }
+                  onEffortChange={(value) =>
+                    setBuildFixModel((prev) => ({ ...prev, effort: value }))
                   }
                 />
               </div>
@@ -817,10 +990,6 @@ export default function SettingsPage() {
                     <SelectValue placeholder="Select provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                    <SelectItem value="openrouter">OpenRouter</SelectItem>
-                    <SelectItem value="anthropic">Anthropic</SelectItem>
-                    <SelectItem value="custom">Custom endpoint</SelectItem>
                     <SelectItem value="claude-cli">
                       Claude CLI (subscription)
                     </SelectItem>
@@ -838,9 +1007,17 @@ export default function SettingsPage() {
                 <AiModelField
                   provider={latexWriterModel.provider}
                   model={latexWriterModel.model}
+                  effort={latexWriterModel.effort}
                   cliModels={cliStatus?.models ?? null}
-                  onModelChange={(value) =>
-                    setLatexWriterModel((prev) => ({ ...prev, model: value }))
+                  onModelChange={(value, nextEffort) =>
+                    setLatexWriterModel((prev) => ({
+                      ...prev,
+                      model: value,
+                      effort: nextEffort,
+                    }))
+                  }
+                  onEffortChange={(value) =>
+                    setLatexWriterModel((prev) => ({ ...prev, effort: value }))
                   }
                 />
               </div>

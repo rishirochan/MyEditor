@@ -639,7 +639,7 @@ export function FileTree({
         onFileSelect(fileId, filePath);
       }
     },
-    [readOnly, lastClickedFileId, flatFileIds, onFileSelect]
+    [readOnly, lastClickedFileId, flatFileIds, onFileSelect, activeFileId]
   );
 
   // ─── Copy & Paste files ─────────────────────────────

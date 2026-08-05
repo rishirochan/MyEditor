@@ -20,6 +20,7 @@ const providerSchema = z.enum([
 const modelConfigSchema = z.object({
   provider: providerSchema,
   model: z.string().trim().min(1).max(255),
+  effort: z.string().trim().min(1).max(32).nullable().optional(),
   endpoint: z.string().trim().max(2000).nullable().optional(),
   apiKey: z.string().trim().max(4000).nullable().optional(),
 });
@@ -55,9 +56,18 @@ function normalizeModelConfig(
     apiKey = normalizeNullable(input.apiKey);
   }
 
+  // Mirror the apiKey rule: absent means "keep", explicit null means "clear".
+  const effort =
+    input.provider === "claude-cli" || input.provider === "codex-cli"
+      ? input.effort !== undefined
+        ? normalizeNullable(input.effort)
+        : existing.effort
+      : null;
+
   return {
     provider: input.provider,
     model: input.model.trim(),
+    effort,
     endpoint,
     apiKey,
   };

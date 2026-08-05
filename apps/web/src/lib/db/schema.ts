@@ -242,6 +242,7 @@ export const userAiSettings = pgTable(
     buildModel: varchar("build_model", { length: 255 })
       .default("gpt-4o-mini")
       .notNull(),
+    buildEffort: varchar("build_effort", { length: 32 }),
     buildEndpoint: text("build_endpoint"),
     buildApiKey: text("build_api_key"),
     writerProvider: varchar("writer_provider", { length: 32 })
@@ -250,6 +251,7 @@ export const userAiSettings = pgTable(
     writerModel: varchar("writer_model", { length: 255 })
       .default("gpt-4o-mini")
       .notNull(),
+    writerEffort: varchar("writer_effort", { length: 32 }),
     writerEndpoint: text("writer_endpoint"),
     writerApiKey: text("writer_api_key"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
