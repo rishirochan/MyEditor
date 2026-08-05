@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
+import { PasswordInput } from "@/components/ui/password-input";
 
 interface PasswordPromptDialogProps {
   open: boolean;
@@ -75,14 +76,12 @@ export function PasswordPromptDialog({
         <p className="mb-4 text-sm text-text-secondary">{message}</p>
 
         <form onSubmit={handleSubmit}>
-          <input
+          <PasswordInput
             ref={inputRef}
-            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Current password"
             autoComplete="current-password"
-            className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
           />
 
           {errorMessage && (
