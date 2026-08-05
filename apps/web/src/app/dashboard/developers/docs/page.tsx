@@ -911,7 +911,7 @@ curl "${BASE}/compile/JOB_ID/output?format=pdf" \\
     "latexWriter": { "provider": "anthropic", "model": "claude-3-5-sonnet-latest", "endpoint": null }
   }'`,
         notes:
-          "Provider options: openai, openrouter, anthropic, custom. Custom provider requires endpoint.",
+          "Provider options: openai, openrouter, anthropic, custom, claude-cli, codex-cli. Custom provider requires endpoint. claude-cli/codex-cli use local CLI logins on the server machine (no API key).",
       },
       {
         method: "POST",

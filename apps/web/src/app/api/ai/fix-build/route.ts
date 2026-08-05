@@ -170,12 +170,6 @@ export async function POST(request: NextRequest) {
     }
 
     const aiSettings = await getUserAiSettings(user.id);
-    if (!aiSettings.enabled) {
-      return NextResponse.json(
-        { error: "AI features are disabled in your settings" },
-        { status: 403 }
-      );
-    }
 
     const project = access.project;
     const projectDir = storage.getProjectDir(project.userId, projectId);

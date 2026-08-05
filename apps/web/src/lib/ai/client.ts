@@ -1,5 +1,8 @@
 import type { AiModelSettings } from "@/lib/ai/types";
+import { isCliProvider } from "@/lib/ai/types";
 import { resolveAiApiKey, resolveAiBaseUrl } from "@/lib/ai/settings";
+import { completeWithClaudeCli } from "@/lib/ai/cliClaude";
+import { completeWithCodexCli } from "@/lib/ai/cliCodex";
 
 export interface StrictJsonCompletionParams {
   modelSettings: AiModelSettings;
@@ -148,9 +151,32 @@ async function callAnthropic(
   }
 }
 
+async function callCliProvider(
+  params: StrictJsonCompletionParams
+): Promise<string> {
+  if (params.modelSettings.provider === "claude-cli") {
+    return completeWithClaudeCli({
+      model: params.modelSettings.model,
+      systemPrompt: params.systemPrompt,
+      userPrompt: params.userPrompt,
+    });
+  }
+
+  return completeWithCodexCli({
+    model: params.modelSettings.model,
+    systemPrompt: params.systemPrompt,
+    userPrompt: params.userPrompt,
+  });
+}
+
 export async function completeStrictJson(
   params: StrictJsonCompletionParams
 ): Promise<unknown> {
+  if (isCliProvider(params.modelSettings.provider)) {
+    const text = await callCliProvider(params);
+    return extractJsonPayload(text);
+  }
+
   const apiKey = resolveAiApiKey(params.modelSettings);
   if (!apiKey) {
     throw new Error(

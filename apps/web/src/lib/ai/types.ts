@@ -1,4 +1,10 @@
-export type AiProvider = "openai" | "openrouter" | "anthropic" | "custom";
+export type AiProvider =
+  | "openai"
+  | "openrouter"
+  | "anthropic"
+  | "custom"
+  | "claude-cli"
+  | "codex-cli";
 
 export type AiPurpose = "buildFix" | "latexWriter";
 
@@ -26,4 +32,10 @@ export interface PublicUserAiSettings {
   enabled: boolean;
   buildFix: PublicAiModelSettings;
   latexWriter: PublicAiModelSettings;
+}
+
+export function isCliProvider(
+  provider: AiProvider
+): provider is "claude-cli" | "codex-cli" {
+  return provider === "claude-cli" || provider === "codex-cli";
 }

@@ -13,6 +13,8 @@ const providerSchema = z.enum([
   "openrouter",
   "anthropic",
   "custom",
+  "claude-cli",
+  "codex-cli",
 ] satisfies [AiProvider, ...AiProvider[]]);
 
 const modelConfigSchema = z.object({
@@ -38,13 +40,18 @@ function normalizeModelConfig(
   input: z.infer<typeof modelConfigSchema>,
   existing: AiModelSettings
 ): AiModelSettings {
-  const endpoint = normalizeNullable(input.endpoint);
+  const endpoint =
+    input.provider === "claude-cli" || input.provider === "codex-cli"
+      ? null
+      : normalizeNullable(input.endpoint);
   if (input.provider === "custom" && !endpoint) {
     throw new Error("Custom provider requires endpoint");
   }
 
   let apiKey = existing.apiKey;
-  if (input.apiKey !== undefined) {
+  if (input.provider === "claude-cli" || input.provider === "codex-cli") {
+    apiKey = null;
+  } else if (input.apiKey !== undefined) {
     apiKey = normalizeNullable(input.apiKey);
   }
 

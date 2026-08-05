@@ -7,10 +7,18 @@ import type {
   PublicUserAiSettings,
   UserAiSettings,
 } from "@/lib/ai/types";
+import { isCliProvider } from "@/lib/ai/types";
 import { eq } from "drizzle-orm";
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secrets";
 
-const AI_PROVIDERS = ["openai", "openrouter", "anthropic", "custom"] as const;
+const AI_PROVIDERS = [
+  "openai",
+  "openrouter",
+  "anthropic",
+  "custom",
+  "claude-cli",
+  "codex-cli",
+] as const;
 
 function isAiProvider(value: string): value is AiProvider {
   return (AI_PROVIDERS as readonly string[]).includes(value);
@@ -43,6 +51,13 @@ function encryptApiKeyForStorage(value: string | null | undefined): string | nul
 }
 
 function defaultModelFor(provider: AiProvider, purpose: AiPurpose): string {
+  if (provider === "claude-cli") {
+    return process.env.AI_CLAUDE_CLI_MODEL || "sonnet";
+  }
+  if (provider === "codex-cli") {
+    return process.env.AI_CODEX_CLI_MODEL || "gpt-5.6-sol";
+  }
+
   if (purpose === "buildFix") {
     if (provider === "openrouter") {
       return process.env.AI_BUILD_FIX_MODEL_OPENROUTER || "openai/gpt-4o-mini";
@@ -95,7 +110,7 @@ function rowToSettings(row: UserAiSettingsRow | null): UserAiSettings {
     : defaults.latexWriter.provider;
 
   return {
-    enabled: row.aiEnabled ?? true,
+    enabled: true,
     buildFix: {
       provider: buildProvider,
       model: row.buildModel?.trim() || defaultModelFor(buildProvider, "buildFix"),
@@ -139,7 +154,7 @@ export async function upsertUserAiSettings(
     .insert(userAiSettings)
     .values({
       userId,
-      aiEnabled: settings.enabled,
+      aiEnabled: true,
       buildProvider: settings.buildFix.provider,
       buildModel: settings.buildFix.model,
       buildEndpoint: normalizeNullable(settings.buildFix.endpoint),
@@ -153,7 +168,7 @@ export async function upsertUserAiSettings(
     .onConflictDoUpdate({
       target: userAiSettings.userId,
       set: {
-        aiEnabled: settings.enabled,
+        aiEnabled: true,
         buildProvider: settings.buildFix.provider,
         buildModel: settings.buildFix.model,
         buildEndpoint: normalizeNullable(settings.buildFix.endpoint),
@@ -172,23 +187,31 @@ export async function upsertUserAiSettings(
 
 export function toPublicAiSettings(settings: UserAiSettings): PublicUserAiSettings {
   return {
-    enabled: settings.enabled,
+    enabled: true,
     buildFix: {
       provider: settings.buildFix.provider,
       model: settings.buildFix.model,
       endpoint: settings.buildFix.endpoint,
-      apiKeySet: Boolean(settings.buildFix.apiKey),
+      apiKeySet: isCliProvider(settings.buildFix.provider)
+        ? false
+        : Boolean(settings.buildFix.apiKey),
     },
     latexWriter: {
       provider: settings.latexWriter.provider,
       model: settings.latexWriter.model,
       endpoint: settings.latexWriter.endpoint,
-      apiKeySet: Boolean(settings.latexWriter.apiKey),
+      apiKeySet: isCliProvider(settings.latexWriter.provider)
+        ? false
+        : Boolean(settings.latexWriter.apiKey),
     },
   };
 }
 
 export function resolveAiApiKey(modelSettings: AiModelSettings): string | null {
+  if (isCliProvider(modelSettings.provider)) {
+    return null;
+  }
+
   if (modelSettings.apiKey?.trim()) {
     return modelSettings.apiKey.trim();
   }
@@ -208,6 +231,10 @@ export function resolveAiApiKey(modelSettings: AiModelSettings): string | null {
 }
 
 export function resolveAiBaseUrl(modelSettings: AiModelSettings): string {
+  if (isCliProvider(modelSettings.provider)) {
+    return "";
+  }
+
   const custom = normalizeNullable(modelSettings.endpoint);
   if (custom) return custom;
 

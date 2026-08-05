@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { Loader2, Check, AlertCircle, Sparkles } from "lucide-react";
+import { Loader2, Check, AlertCircle, Sparkles, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import {
   Select,
@@ -12,8 +12,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PasswordPromptDialog } from "@/components/ui/password-prompt-dialog";
-
-type AiProvider = "openai" | "openrouter" | "anthropic" | "custom";
+import { PasswordInput } from "@/components/ui/password-input";
+import {
+  defaultModelForProvider,
+  modelsForProvider,
+} from "@/lib/ai/models";
+import type { AiProvider } from "@/lib/ai/types";
+import { isCliProvider } from "@/lib/ai/types";
 
 interface UserInfo {
   id: string;
@@ -48,6 +53,31 @@ interface AiSettingsResponse {
   };
 }
 
+interface CliModelOption {
+  id: string;
+  label: string;
+}
+
+interface CliProviderStatus {
+  installed: boolean;
+  authenticated: boolean;
+  binaryPath: string | null;
+  email: string | null;
+  subscriptionType: string | null;
+  detail: string | null;
+}
+
+interface CliStatusResponse {
+  status: {
+    claude: CliProviderStatus;
+    codex: CliProviderStatus;
+    models: {
+      claude: CliModelOption[];
+      codex: CliModelOption[];
+    };
+  };
+}
+
 function defaultAiModelState(): AiModelFormState {
   return {
     provider: "openai",
@@ -66,10 +96,72 @@ function providerLabel(provider: AiProvider): string {
       return "Anthropic";
     case "custom":
       return "Custom endpoint";
+    case "claude-cli":
+      return "Claude CLI";
+    case "codex-cli":
+      return "Codex CLI";
     case "openai":
     default:
       return "OpenAI";
   }
+}
+
+function AiModelField({
+  provider,
+  model,
+  onModelChange,
+  cliModels,
+}: {
+  provider: AiProvider;
+  model: string;
+  onModelChange: (model: string) => void;
+  cliModels: CliStatusResponse["status"]["models"] | null;
+}) {
+  if (provider === "custom") {
+    return (
+      <input
+        type="text"
+        value={model}
+        onChange={(e) => onModelChange(e.target.value)}
+        required
+        className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+        placeholder={defaultModelForProvider(provider)}
+      />
+    );
+  }
+
+  const liveOptions =
+    provider === "claude-cli"
+      ? cliModels?.claude
+      : provider === "codex-cli"
+        ? cliModels?.codex
+        : null;
+
+  const options =
+    liveOptions && liveOptions.length > 0
+      ? (() => {
+          const ids = liveOptions.map((option) => option.id);
+          if (model.trim() && !ids.includes(model.trim())) {
+            return [{ id: model.trim(), label: model.trim() }, ...liveOptions];
+          }
+          return liveOptions;
+        })()
+      : modelsForProvider(provider, model).map((id) => ({ id, label: id }));
+
+  return (
+    <Select value={model} onValueChange={onModelChange}>
+      <SelectTrigger className="w-full bg-bg-primary">
+        <SelectValue placeholder="Select model" />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.id} value={option.id}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 }
 
 export default function SettingsPage() {
@@ -87,13 +179,38 @@ export default function SettingsPage() {
   const [buildFixModel, setBuildFixModel] = useState<AiModelFormState>(
     defaultAiModelState()
   );
-  const [aiEnabled, setAiEnabled] = useState(true);
   const [latexWriterModel, setLatexWriterModel] = useState<AiModelFormState>(
     defaultAiModelState()
   );
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSuccess, setAiSuccess] = useState("");
   const [aiError, setAiError] = useState("");
+  const [cliStatus, setCliStatus] = useState<CliStatusResponse["status"] | null>(
+    null
+  );
+  const [cliStatusLoading, setCliStatusLoading] = useState(false);
+  const [cliLoginBusy, setCliLoginBusy] = useState<"claude-cli" | "codex-cli" | null>(
+    null
+  );
+  const [cliMessage, setCliMessage] = useState("");
+
+  const refreshCliStatus = useCallback(async () => {
+    setCliStatusLoading(true);
+    try {
+      const res = await fetch("/api/ai/cli-status", { cache: "no-store" });
+      if (!res.ok) {
+        setCliMessage("Failed to detect local CLI status");
+        return;
+      }
+      const data = (await res.json()) as CliStatusResponse;
+      setCliStatus(data.status);
+      setCliMessage("");
+    } catch {
+      setCliMessage("Failed to detect local CLI status");
+    } finally {
+      setCliStatusLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     async function loadSettings() {
@@ -112,7 +229,6 @@ export default function SettingsPage() {
 
         if (aiRes.ok) {
           const aiData = (await aiRes.json()) as AiSettingsResponse;
-          setAiEnabled(aiData.settings.enabled);
           setBuildFixModel({
             provider: aiData.settings.buildFix.provider,
             model: aiData.settings.buildFix.model,
@@ -128,6 +244,8 @@ export default function SettingsPage() {
             apiKeySet: aiData.settings.latexWriter.apiKeySet,
           });
         }
+
+        await refreshCliStatus();
       } catch {
         setProfileError("Failed to load settings");
       } finally {
@@ -136,7 +254,57 @@ export default function SettingsPage() {
     }
 
     loadSettings();
-  }, []);
+  }, [refreshCliStatus]);
+
+  async function startCliLogin(provider: "claude-cli" | "codex-cli") {
+    setCliLoginBusy(provider);
+    setCliMessage("");
+    try {
+      const res = await fetch("/api/ai/cli-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCliMessage(payload.error || "Failed to start CLI login");
+        return;
+      }
+      setCliMessage(
+        payload.message ||
+          "Login opened in your browser. Click Refresh after finishing."
+      );
+      setTimeout(() => {
+        void refreshCliStatus();
+      }, 2500);
+    } catch {
+      setCliMessage("Failed to start CLI login");
+    } finally {
+      setCliLoginBusy(null);
+    }
+  }
+
+  function onProviderChange(
+    purpose: "buildFix" | "latexWriter",
+    provider: AiProvider
+  ) {
+    const liveDefault =
+      provider === "claude-cli"
+        ? cliStatus?.models.claude[0]?.id
+        : provider === "codex-cli"
+          ? cliStatus?.models.codex[0]?.id
+          : null;
+
+    const updater = (prev: AiModelFormState): AiModelFormState => ({
+      ...prev,
+      provider,
+      model: liveDefault || defaultModelForProvider(provider),
+      endpoint: isCliProvider(provider) ? "" : prev.endpoint,
+      apiKey: isCliProvider(provider) ? "" : prev.apiKey,
+    });
+    if (purpose === "buildFix") setBuildFixModel(updater);
+    else setLatexWriterModel(updater);
+  }
 
   function onProfileSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -227,7 +395,7 @@ export default function SettingsPage() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          enabled: aiEnabled,
+          enabled: true,
           buildFix: buildFixPayload,
           latexWriter: latexWriterPayload,
         }),
@@ -240,7 +408,6 @@ export default function SettingsPage() {
       }
 
       const saved = payload.settings as AiSettingsResponse["settings"];
-      setAiEnabled(saved.enabled);
       setBuildFixModel((prev) => ({
         ...prev,
         provider: saved.buildFix.provider,
@@ -415,40 +582,102 @@ export default function SettingsPage() {
         )}
 
         <form onSubmit={saveAiSettings} className="space-y-6">
-          <div className="rounded-lg border border-border bg-bg-secondary p-4">
+          <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-sm font-semibold text-text-primary">
-                  Enable AI Features
+                  Local CLI status
                 </h3>
                 <p className="mt-1 text-xs text-text-muted">
-                  Controls AI actions globally, including “Fix with AI” in build
-                  logs.
+                  Use your Claude or ChatGPT subscription via the CLIs already
+                  installed on this machine. No proxy required.
                 </p>
               </div>
-
               <button
                 type="button"
-                role="switch"
-                aria-checked={aiEnabled}
-                aria-label="Toggle AI features"
-                onClick={() => setAiEnabled((prev) => !prev)}
-                className={cn(
-                  "relative inline-flex h-6 w-11 items-center rounded-md border transition-colors",
-                  aiEnabled
-                    ? "border-accent/70 bg-accent/25"
-                    : "border-border bg-bg-tertiary"
-                )}
+                onClick={() => void refreshCliStatus()}
+                disabled={cliStatusLoading}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-tertiary disabled:opacity-50"
               >
-                <span
-                  className={cn(
-                    "inline-block h-5 w-5 rounded-sm transition-all",
-                    aiEnabled
-                      ? "translate-x-5 bg-accent shadow-sm shadow-accent/30"
-                      : "translate-x-0.5 bg-bg-primary"
-                  )}
+                <RefreshCw
+                  className={cn("h-3.5 w-3.5", cliStatusLoading && "animate-spin")}
                 />
+                Refresh
               </button>
+            </div>
+
+            {cliMessage && (
+              <p className="text-xs text-text-muted">{cliMessage}</p>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(
+                [
+                  {
+                    key: "claude" as const,
+                    label: "Claude CLI",
+                    provider: "claude-cli" as const,
+                  },
+                  {
+                    key: "codex" as const,
+                    label: "Codex CLI",
+                    provider: "codex-cli" as const,
+                  },
+                ] as const
+              ).map(({ key, label, provider }) => {
+                const status = cliStatus?.[key];
+                const ready = Boolean(status?.installed && status.authenticated);
+                return (
+                  <div
+                    key={key}
+                    className="rounded-md border border-border bg-bg-primary p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-text-primary">
+                        {label}
+                      </p>
+                      <span
+                        className={cn(
+                          "text-[11px] font-medium",
+                          ready ? "text-success" : "text-text-muted"
+                        )}
+                      >
+                        {!status
+                          ? "Checking…"
+                          : !status.installed
+                            ? "Not installed"
+                            : status.authenticated
+                              ? "Logged in"
+                              : "Not logged in"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-text-muted break-all">
+                      {status?.email
+                        ? status.email
+                        : status?.binaryPath
+                          ? status.binaryPath
+                          : status?.detail || "—"}
+                    </p>
+                    {status?.subscriptionType && status.authenticated && (
+                      <p className="text-[11px] text-text-muted">
+                        Plan: {status.subscriptionType}
+                      </p>
+                    )}
+                    {!ready && (
+                      <button
+                        type="button"
+                        onClick={() => void startCliLogin(provider)}
+                        disabled={
+                          !status?.installed || cliLoginBusy === provider
+                        }
+                        className="rounded-md bg-accent/15 px-2.5 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {cliLoginBusy === provider ? "Opening…" : "Log in"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -470,10 +699,7 @@ export default function SettingsPage() {
                 <Select
                   value={buildFixModel.provider}
                   onValueChange={(value) =>
-                    setBuildFixModel((prev) => ({
-                      ...prev,
-                      provider: value as AiProvider,
-                    }))
+                    onProviderChange("buildFix", value as AiProvider)
                   }
                 >
                   <SelectTrigger className="w-full bg-bg-primary">
@@ -484,6 +710,12 @@ export default function SettingsPage() {
                     <SelectItem value="openrouter">OpenRouter</SelectItem>
                     <SelectItem value="anthropic">Anthropic</SelectItem>
                     <SelectItem value="custom">Custom endpoint</SelectItem>
+                    <SelectItem value="claude-cli">
+                      Claude CLI (subscription)
+                    </SelectItem>
+                    <SelectItem value="codex-cli">
+                      Codex CLI (subscription)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -492,71 +724,73 @@ export default function SettingsPage() {
                 <label className="mb-1.5 block text-sm font-medium text-text-secondary">
                   Model
                 </label>
-                <input
-                  type="text"
-                  value={buildFixModel.model}
-                  onChange={(e) =>
-                    setBuildFixModel((prev) => ({
-                      ...prev,
-                      model: e.target.value,
-                    }))
-                  }
-                  required
-                  className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
-                  placeholder={
-                    buildFixModel.provider === "anthropic"
-                      ? "claude-3-5-sonnet-latest"
-                      : "gpt-4o-mini"
+                <AiModelField
+                  provider={buildFixModel.provider}
+                  model={buildFixModel.model}
+                  cliModels={cliStatus?.models ?? null}
+                  onModelChange={(value) =>
+                    setBuildFixModel((prev) => ({ ...prev, model: value }))
                   }
                 />
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                  Endpoint URL
-                </label>
-                <input
-                  type="url"
-                  value={buildFixModel.endpoint}
-                  onChange={(e) =>
-                    setBuildFixModel((prev) => ({
-                      ...prev,
-                      endpoint: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
-                  placeholder={
-                    buildFixModel.provider === "custom"
-                      ? "https://your-host/v1"
-                      : "Optional override"
-                  }
-                />
-              </div>
+              {!isCliProvider(buildFixModel.provider) && (
+                <>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+                      Endpoint URL
+                    </label>
+                    <input
+                      type="url"
+                      value={buildFixModel.endpoint}
+                      onChange={(e) =>
+                        setBuildFixModel((prev) => ({
+                          ...prev,
+                          endpoint: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+                      placeholder={
+                        buildFixModel.provider === "custom"
+                          ? "https://your-host/v1"
+                          : "Optional override"
+                      }
+                    />
+                  </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                  API Key
-                </label>
-                <input
-                  type="password"
-                  value={buildFixModel.apiKey}
-                  onChange={(e) =>
-                    setBuildFixModel((prev) => ({
-                      ...prev,
-                      apiKey: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
-                  placeholder={
-                    buildFixModel.apiKeySet
-                      ? "Stored key exists, leave blank to keep"
-                      : "sk-..."
-                  }
-                />
-                <p className="mt-1 text-xs text-text-muted">
-                  Required for AI features. Saved encrypted to your account, so it works on any device you sign in from. Leave blank to use the server&apos;s fallback key if the admin configured one.
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+                      API Key
+                    </label>
+                    <PasswordInput
+                      value={buildFixModel.apiKey}
+                      onChange={(e) =>
+                        setBuildFixModel((prev) => ({
+                          ...prev,
+                          apiKey: e.target.value,
+                        }))
+                      }
+                      className="bg-bg-primary"
+                      placeholder={
+                        buildFixModel.apiKeySet
+                          ? "Stored key exists, leave blank to keep"
+                          : "sk-..."
+                      }
+                    />
+                    <p className="mt-1 text-xs text-text-muted">
+                      Required for API providers. Saved encrypted to your account.
+                      Leave blank to use the server&apos;s fallback key if configured.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {isCliProvider(buildFixModel.provider) && (
+                <p className="text-xs text-text-muted">
+                  Uses your local {providerLabel(buildFixModel.provider)} login.
+                  No API key or endpoint needed.
                 </p>
-              </div>
+              )}
             </div>
 
             <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-4">
@@ -576,10 +810,7 @@ export default function SettingsPage() {
                 <Select
                   value={latexWriterModel.provider}
                   onValueChange={(value) =>
-                    setLatexWriterModel((prev) => ({
-                      ...prev,
-                      provider: value as AiProvider,
-                    }))
+                    onProviderChange("latexWriter", value as AiProvider)
                   }
                 >
                   <SelectTrigger className="w-full bg-bg-primary">
@@ -590,6 +821,12 @@ export default function SettingsPage() {
                     <SelectItem value="openrouter">OpenRouter</SelectItem>
                     <SelectItem value="anthropic">Anthropic</SelectItem>
                     <SelectItem value="custom">Custom endpoint</SelectItem>
+                    <SelectItem value="claude-cli">
+                      Claude CLI (subscription)
+                    </SelectItem>
+                    <SelectItem value="codex-cli">
+                      Codex CLI (subscription)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -598,71 +835,73 @@ export default function SettingsPage() {
                 <label className="mb-1.5 block text-sm font-medium text-text-secondary">
                   Model
                 </label>
-                <input
-                  type="text"
-                  value={latexWriterModel.model}
-                  onChange={(e) =>
-                    setLatexWriterModel((prev) => ({
-                      ...prev,
-                      model: e.target.value,
-                    }))
-                  }
-                  required
-                  className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
-                  placeholder={
-                    latexWriterModel.provider === "anthropic"
-                      ? "claude-3-5-sonnet-latest"
-                      : "gpt-4o-mini"
+                <AiModelField
+                  provider={latexWriterModel.provider}
+                  model={latexWriterModel.model}
+                  cliModels={cliStatus?.models ?? null}
+                  onModelChange={(value) =>
+                    setLatexWriterModel((prev) => ({ ...prev, model: value }))
                   }
                 />
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                  Endpoint URL
-                </label>
-                <input
-                  type="url"
-                  value={latexWriterModel.endpoint}
-                  onChange={(e) =>
-                    setLatexWriterModel((prev) => ({
-                      ...prev,
-                      endpoint: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
-                  placeholder={
-                    latexWriterModel.provider === "custom"
-                      ? "https://your-host/v1"
-                      : "Optional override"
-                  }
-                />
-              </div>
+              {!isCliProvider(latexWriterModel.provider) && (
+                <>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+                      Endpoint URL
+                    </label>
+                    <input
+                      type="url"
+                      value={latexWriterModel.endpoint}
+                      onChange={(e) =>
+                        setLatexWriterModel((prev) => ({
+                          ...prev,
+                          endpoint: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+                      placeholder={
+                        latexWriterModel.provider === "custom"
+                          ? "https://your-host/v1"
+                          : "Optional override"
+                      }
+                    />
+                  </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                  API Key
-                </label>
-                <input
-                  type="password"
-                  value={latexWriterModel.apiKey}
-                  onChange={(e) =>
-                    setLatexWriterModel((prev) => ({
-                      ...prev,
-                      apiKey: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
-                  placeholder={
-                    latexWriterModel.apiKeySet
-                      ? "Stored key exists, leave blank to keep"
-                      : "sk-..."
-                  }
-                />
-                <p className="mt-1 text-xs text-text-muted">
-                  Required for AI features. Saved encrypted to your account, so it works on any device you sign in from. Leave blank to use the server&apos;s fallback key if the admin configured one.
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+                      API Key
+                    </label>
+                    <PasswordInput
+                      value={latexWriterModel.apiKey}
+                      onChange={(e) =>
+                        setLatexWriterModel((prev) => ({
+                          ...prev,
+                          apiKey: e.target.value,
+                        }))
+                      }
+                      className="bg-bg-primary"
+                      placeholder={
+                        latexWriterModel.apiKeySet
+                          ? "Stored key exists, leave blank to keep"
+                          : "sk-..."
+                      }
+                    />
+                    <p className="mt-1 text-xs text-text-muted">
+                      Required for API providers. Saved encrypted to your account.
+                      Leave blank to use the server&apos;s fallback key if configured.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {isCliProvider(latexWriterModel.provider) && (
+                <p className="text-xs text-text-muted">
+                  Uses your local {providerLabel(latexWriterModel.provider)} login.
+                  No API key or endpoint needed.
                 </p>
-              </div>
+              )}
             </div>
           </div>
 
