@@ -64,7 +64,8 @@ async function tableExists(client, tableName) {
 
 async function ensureMigrationsTable(client) {
   await client.unsafe(`
-    CREATE TABLE IF NOT EXISTS public.__drizzle_migrations (
+    CREATE SCHEMA IF NOT EXISTS drizzle;
+    CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
       id SERIAL PRIMARY KEY,
       hash text NOT NULL,
       created_at bigint
@@ -72,54 +73,97 @@ async function ensureMigrationsTable(client) {
   `);
 }
 
-async function hasMigrationHash(client, hash) {
-  const rows = await client`
-    SELECT 1
-    FROM public.__drizzle_migrations
-    WHERE hash = ${hash}
-    LIMIT 1
-  `;
-  return rows.length > 0;
+/**
+ * Older versions tracked migrations in public.__drizzle_migrations, where
+ * `drizzle-kit push` sees it as a stray table and drops it — after which this
+ * script re-applies every migration against an already-migrated database.
+ * Move it into the `drizzle` schema, which push never touches.
+ */
+async function moveTrackingTableOutOfPublic(client) {
+  if (!(await tableExists(client, "__drizzle_migrations"))) return;
+
+  await client.unsafe(`CREATE SCHEMA IF NOT EXISTS drizzle`);
+  await client.unsafe(`
+    INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+    SELECT hash, created_at FROM public.__drizzle_migrations
+    WHERE hash NOT IN (SELECT hash FROM drizzle.__drizzle_migrations);
+    DROP TABLE public.__drizzle_migrations;
+  `);
+  console.log("[migrate] Moved migration tracking to the drizzle schema");
 }
 
 async function insertMigrationHash(client, hash, createdAt) {
   await client`
-    INSERT INTO public.__drizzle_migrations (hash, created_at)
+    INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
     VALUES (${hash}, ${createdAt})
   `;
 }
 
-/**
- * If a DB already has app tables but has no migration tracking at all,
- * baseline ONLY the initial migration (idx 0) so Drizzle won't re-run it.
- * Subsequent migrations will be applied normally by Drizzle's migrate().
- * Fresh DBs (no tables) skip this entirely and let migrate() create everything.
- */
-async function baselineInitialMigrationIfNeeded(client, migrationsFolder) {
-  const usersTableExists = await tableExists(client, "users");
-  if (!usersTableExists) return;
-
-  await ensureMigrationsTable(client);
-
-  // If the migrations table already has entries, baselining was already done.
-  const existingRows = await client`
-    SELECT 1 FROM public.__drizzle_migrations LIMIT 1
+async function hasMigrationHash(client, hash) {
+  const rows = await client`
+    SELECT 1 FROM drizzle.__drizzle_migrations WHERE hash = ${hash} LIMIT 1
   `;
-  if (existingRows.length > 0) return;
+  return rows.length > 0;
+}
 
-  const journal = readJournal(migrationsFolder);
-  if (!Array.isArray(journal.entries) || journal.entries.length === 0) {
-    throw new Error("Migration journal is empty");
+/**
+ * A database with app tables but no migration history (created by `db:push`, or
+ * left over from before migrations existed) cannot be versioned by looking at
+ * it, and replaying migrations onto it fails on the first CREATE TABLE. Refuse,
+ * and tell the operator how to declare where the schema actually stands:
+ *
+ *   DRIZZLE_BASELINE=latest            — schema already matches schema.ts
+ *   DRIZZLE_BASELINE=0002_ai_settings  — applied up to and including this tag
+ *
+ * Setting it also repairs a history that is behind the real schema, which is
+ * how databases baselined by earlier versions of this script were left.
+ */
+async function baselineIfNeeded(client, migrationsFolder) {
+  if (!(await tableExists(client, "users"))) return; // fresh DB: migrate() builds it
+
+  const baseline = process.env.DRIZZLE_BASELINE;
+  if (!baseline) {
+    const tracked = await client`SELECT 1 FROM drizzle.__drizzle_migrations LIMIT 1`;
+    if (tracked.length > 0) return;
+
+    throw fatal(
+      "Database has application tables but no migration history. Re-run with " +
+        "DRIZZLE_BASELINE=latest if its schema is already up to date (e.g. it " +
+        "was created with `db:push`), or DRIZZLE_BASELINE=<migration tag> to " +
+        "record migrations up to that point."
+    );
   }
 
-  // Only baseline the initial migration (the one that created the existing tables).
-  const initialEntry = journal.entries[0];
-  const sqlPath = path.join(migrationsFolder, `${initialEntry.tag}.sql`);
-  if (!fs.existsSync(sqlPath)) return;
+  const entries = readJournal(migrationsFolder).entries;
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw fatal("Migration journal is empty");
+  }
 
-  const hash = sha256File(sqlPath);
-  await insertMigrationHash(client, hash, Number(initialEntry.when ?? Date.now()));
-  console.log(`[migrate] Baseline recorded for ${initialEntry.tag}`);
+  const upTo =
+    baseline === "latest"
+      ? entries.length - 1
+      : entries.findIndex((e) => e.tag === baseline);
+  if (upTo < 0) {
+    throw fatal(
+      `Unknown DRIZZLE_BASELINE tag: ${baseline}. Tags: ${entries
+        .map((e) => e.tag)
+        .join(", ")}`
+    );
+  }
+
+  for (const entry of entries.slice(0, upTo + 1)) {
+    const sqlPath = path.join(migrationsFolder, `${entry.tag}.sql`);
+    if (!fs.existsSync(sqlPath)) continue;
+    const hash = sha256File(sqlPath);
+    if (await hasMigrationHash(client, hash)) continue;
+    await insertMigrationHash(client, hash, Number(entry.when ?? Date.now()));
+    console.log(`[migrate] Baseline recorded for ${entry.tag}`);
+  }
+}
+
+/** An error retrying cannot fix — stop the attempt loop immediately. */
+function fatal(message) {
+  return Object.assign(new Error(message), { fatal: true });
 }
 
 function sleep(ms) {
@@ -160,13 +204,12 @@ async function main() {
       lockAcquired = true;
       console.log("[migrate] Migration lock acquired");
 
-      await baselineInitialMigrationIfNeeded(client, migrationsFolder);
+      await ensureMigrationsTable(client);
+      await moveTrackingTableOutOfPublic(client);
+      await baselineIfNeeded(client, migrationsFolder);
 
       const db = drizzle(client);
-      await migrate(db, {
-        migrationsFolder,
-        migrationsSchema: "public",
-      });
+      await migrate(db, { migrationsFolder });
 
       console.log("[migrate] Pending migrations applied successfully");
       await client.end();
@@ -174,10 +217,8 @@ async function main() {
     } catch (error) {
       const msg = error?.message || String(error);
 
-      if (attempt === maxAttempts) {
-        console.error(
-          `[migrate] Migrations failed after ${maxAttempts} attempts: ${msg}`
-        );
+      if (error?.fatal || attempt === maxAttempts) {
+        console.error(`[migrate] Migrations failed: ${msg}`);
         await client.end();
         process.exit(1);
       }

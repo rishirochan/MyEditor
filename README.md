@@ -399,11 +399,17 @@ REDIS_URL=redis://localhost:6379
 SESSION_SECRET=dev-secret-change-in-production
 ```
 
-**4. Push the database schema:**
+**4. Create the database schema:**
 
 ```bash
-cd apps/web && pnpm db:push
+cd apps/web && pnpm db:migrate
 ```
+
+`db:push` writes `schema.ts` straight to the database without recording a
+migration. It is handy while iterating on a schema locally, but a database
+built that way has no migration history — `db:migrate` will then refuse to run
+and tell you to re-run it with `DRIZZLE_BASELINE=latest` to adopt the existing
+schema.
 
 **5. Build the compiler Docker image:**
 
