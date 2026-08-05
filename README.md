@@ -417,6 +417,8 @@ pnpm dev
 
 That one command starts Postgres + Redis (waits until healthy) and then runs the web app, WebSocket server, and compile worker in parallel with prefixed logs. `Ctrl+C` stops all three; `pnpm stop` also shuts down the containers.
 
+If one of the three exits with an error, pnpm stops the other two — just rerun `pnpm dev`. To iterate on a single app, run it on its own in a second terminal (for example `pnpm --filter @myeditor/worker dev`). The dev containers are pinned to the `myeditor` Compose project, so they are shared rather than duplicated when you run from a git worktree or a second clone.
+
 If you prefer compile execution inside the web process during local development, set `RUN_COMPILE_RUNNER_IN_WEB=true` and run `pnpm --filter '!@myeditor/worker' -r --parallel dev` instead.
 
 **5.** Open [http://localhost:3000](http://localhost:3000)

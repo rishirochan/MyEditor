@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "setup": "pnpm install && docker compose build compiler-image && pnpm services && pnpm --filter @myeditor/web db:push",
-    "services": "docker compose -f docker-compose.dev.yml up -d --wait",
+    "services": "docker compose -p myeditor -f docker-compose.dev.yml up -d --wait",
     "dev": "pnpm services && pnpm -r --parallel dev",
-    "stop": "docker compose -f docker-compose.dev.yml down"
+    "stop": "docker compose -p myeditor -f docker-compose.dev.yml down"
   },
   "devDependencies": {
     "drizzle-orm": "0.45.2"
