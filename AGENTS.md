@@ -13,8 +13,10 @@ This repository is a `pnpm` monorepo.
 Keep feature code close to its runtime module, and move cross-app contracts to `packages/shared`.
 
 ## Build, Test, and Development Commands
+- `pnpm setup`: one-time local setup (install, build compiler image, start services, push schema).
+- `pnpm dev`: start Postgres + Redis and run web + ws + worker in one terminal.
+- `pnpm services` / `pnpm stop`: start (waiting for healthy) or stop local Postgres + Redis.
 - `pnpm install`: install all workspace dependencies.
-- `docker compose -f docker-compose.dev.yml up -d`: start local Postgres + Redis.
 - `pnpm --filter @myeditor/web dev`: run the web app at `localhost:3000`.
 - `pnpm --filter @myeditor/ws dev`: run WebSocket server with watch mode.
 - `pnpm --filter @myeditor/worker dev`: run worker with watch mode.

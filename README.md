@@ -363,34 +363,28 @@ myeditor/
 
 If you want to contribute or run MyEditor locally for development:
 
-**1. Clone and install:**
+**1. Clone:**
 
 ```bash
 git clone https://github.com/rishirochan/MyEditor.git
 cd MyEditor
 ```
 
-**2. Start dev services (PostgreSQL + Redis):**
-
-```bash
-docker compose -f docker-compose.dev.yml up -d
-```
-
-**3. Set up environment variables:**
+**2. Set up environment variables:**
 
 Create `apps/web/.env`:
 
 ```env
 DATABASE_URL=postgresql://backslash:devpassword@localhost:5432/backslash
 REDIS_URL=redis://localhost:6379
-STORAGE_PATH=./data
+STORAGE_PATH=/absolute/path/to/MyEditor/data
 TEMPLATES_PATH=../../templates
 COMPILER_IMAGE=myeditor-compiler
 SESSION_SECRET=dev-secret-change-in-production
 RUN_COMPILE_RUNNER_IN_WEB=false
 ```
 
-If you run the standalone WebSocket server in dev, use the same session secret:
+The WebSocket server needs the same session secret:
 
 ```env
 # apps/ws/.env
@@ -399,35 +393,54 @@ REDIS_URL=redis://localhost:6379
 SESSION_SECRET=dev-secret-change-in-production
 ```
 
-**4. Create the database schema:**
+And the compile worker. It loads the web app's compile runner, so it needs the
+database too, and its `STORAGE_PATH` must be the **same absolute path** the web
+app uses — the worker bind-mounts that directory into each compile container, so
+a mismatch means the container cannot see the project files:
 
-```bash
-cd apps/web && pnpm db:migrate
+```env
+# apps/worker/.env
+DATABASE_URL=postgresql://backslash:devpassword@localhost:5432/backslash
+REDIS_URL=redis://localhost:6379
+STORAGE_PATH=/absolute/path/to/MyEditor/data
+TEMPLATES_PATH=/absolute/path/to/MyEditor/templates
+COMPILER_IMAGE=myeditor-compiler
 ```
 
-`db:push` writes `schema.ts` straight to the database without recording a
-migration. It is handy while iterating on a schema locally, but a database
-built that way has no migration history — `db:migrate` will then refuse to run
-and tell you to re-run it with `DRIZZLE_BASELINE=latest` to adopt the existing
-schema.
+Local dev needs Docker Desktop (or Colima) with file sharing enabled for that
+directory. On Windows, use WSL2 — the compile path assumes a POSIX Docker socket.
 
-**5. Build the compiler Docker image:**
+**3. One-time setup** (installs deps, builds the compiler image, starts Postgres + Redis, runs migrations):
 
 ```bash
-docker compose build compiler-image
+pnpm setup
 ```
 
-**6. Start app services (separate terminals):**
+**4. Start everything:**
 
 ```bash
-cd apps/web && pnpm dev
-cd apps/ws && pnpm dev
-cd apps/worker && pnpm dev
+pnpm dev
 ```
 
-If you prefer compile execution inside the web process during local development, set `RUN_COMPILE_RUNNER_IN_WEB=true` and skip `apps/worker`.
+That one command starts Postgres + Redis (waits until healthy) and then runs the web app, WebSocket server, and compile worker in parallel with prefixed logs. `Ctrl+C` stops those three processes; Postgres and Redis keep running in the background until you run `pnpm stop`.
 
-**7.** Open [http://localhost:3000](http://localhost:3000)
+If one of the three exits with an error, pnpm stops the other two — just rerun `pnpm dev`. To iterate on a single app, run it on its own in a second terminal (for example `pnpm --filter @myeditor/worker dev`). The dev containers are pinned to the `myeditor-dev` Compose project, so they are shared rather than duplicated when you run from a git worktree or a second clone — and kept separate from the production stack, which uses `myeditor`.
+
+If you prefer compile execution inside the web process during local development, set `RUN_COMPILE_RUNNER_IN_WEB=true` and run `pnpm --filter '!@myeditor/worker' -r --parallel dev` instead.
+
+**5.** Open [http://localhost:3000](http://localhost:3000)
+
+> `pnpm setup` runs `db:migrate`, not `db:push`. `db:push` writes `schema.ts`
+> straight to the database without recording a migration, so a database built
+> that way has no history — `db:migrate` will then refuse to run until you adopt
+> the existing schema with `DRIZZLE_BASELINE=latest`.
+
+| Script | What it does |
+|---|---|
+| `pnpm dev` | Dev services + web + ws + worker, one terminal |
+| `pnpm setup` | One-time: install, build compiler image, start services, run migrations |
+| `pnpm services` | Just Postgres + Redis (`-d`, waits for healthy) |
+| `pnpm stop` | Stop the dev containers |
 
 ---
 
