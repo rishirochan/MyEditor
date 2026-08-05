@@ -8,10 +8,10 @@
     "start": "node scripts/start.mjs",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "db:generate": "node --preserve-symlinks --preserve-symlinks-main ./node_modules/drizzle-kit/bin.cjs generate",
+    "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.mjs",
-    "db:push": "node --preserve-symlinks --preserve-symlinks-main ./node_modules/drizzle-kit/bin.cjs push",
-    "db:studio": "node --preserve-symlinks --preserve-symlinks-main ./node_modules/drizzle-kit/bin.cjs studio"
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",
