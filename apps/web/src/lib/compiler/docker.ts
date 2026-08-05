@@ -1,8 +1,8 @@
 import Docker from "dockerode";
 import { readFile } from "fs/promises";
 import path from "path";
-import { ENGINE_FLAGS, LIMITS } from "@backslash/shared";
-import type { Engine } from "@backslash/shared";
+import { ENGINE_FLAGS, LIMITS } from "@myeditor/shared";
+import type { Engine } from "@myeditor/shared";
 
 // ─── Docker Client ─────────────────────────────────
 
@@ -19,7 +19,7 @@ export function getDockerClient(): Docker {
 
 // ─── Configuration ─────────────────────────────────
 
-const COMPILER_IMAGE = process.env.COMPILER_IMAGE || "backslash-compiler";
+const COMPILER_IMAGE = process.env.COMPILER_IMAGE || "myeditor-compiler";
 
 const COMPILE_TIMEOUT = parseInt(
   process.env.COMPILE_TIMEOUT ||

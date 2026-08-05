@@ -8,7 +8,7 @@ import type {
   BuildStatus,
   Engine,
   ParsedLogEntry,
-} from "@backslash/shared";
+} from "@myeditor/shared";
 
 interface EditorState {
   // Project

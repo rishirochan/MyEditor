@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils/cn";
-import type { PresenceUser } from "@backslash/shared";
+import type { PresenceUser } from "@myeditor/shared";
 import {
   Tooltip,
   TooltipTrigger,

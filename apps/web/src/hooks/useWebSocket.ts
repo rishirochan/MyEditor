@@ -9,7 +9,7 @@ import type {
   CursorSelection,
   ChatMessage,
   DocChange,
-} from "@backslash/shared";
+} from "@myeditor/shared";
 
 // ─── Types ─────────────────────────────────────────
 

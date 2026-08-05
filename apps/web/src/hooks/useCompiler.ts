@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import type { BuildStatus, ParsedLogEntry } from "@backslash/shared";
+import type { BuildStatus, ParsedLogEntry } from "@myeditor/shared";
 
 interface CompileResult {
   status: BuildStatus;

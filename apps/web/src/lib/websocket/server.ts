@@ -1,5 +1,5 @@
 import IORedis from "ioredis";
-import type { ParsedLogEntry } from "@backslash/shared";
+import type { ParsedLogEntry } from "@myeditor/shared";
 
 // ─── Redis Publisher ───────────────────────────────
 

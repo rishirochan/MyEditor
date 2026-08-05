@@ -4,7 +4,7 @@ import { resolveProjectAccess } from "@/lib/auth/project-access";
 import { validateFilePath } from "@/lib/utils/validation";
 import { broadcastFileEvent } from "@/lib/websocket/server";
 import * as storage from "@/lib/storage";
-import { MIME_TYPES, LIMITS } from "@backslash/shared";
+import { MIME_TYPES, LIMITS } from "@myeditor/shared";
 import { eq, and } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";

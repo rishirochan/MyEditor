@@ -1,7 +1,7 @@
 import { Queue, Worker } from "bullmq";
 import IORedis, { type RedisOptions } from "ioredis";
 import { and, eq, inArray, lt } from "drizzle-orm";
-import { LIMITS } from "@backslash/shared";
+import { LIMITS } from "@myeditor/shared";
 
 import fs from "fs/promises";
 import path from "path";
@@ -558,7 +558,7 @@ async function cleanStaleBuildRecords(): Promise<void> {
 
 // ─── Singleton (survives Next.js hot-reloads) ────────
 
-const RUNNER_KEY = "__backslash_compile_runner__" as const;
+const RUNNER_KEY = "__myeditor_compile_runner__" as const;
 
 function getRunnerInstance(): CompileRunner | null {
   return (

@@ -20,4 +20,4 @@ COPY apps/worker/ apps/worker/
 
 ENV NODE_ENV=production
 
-CMD ["pnpm", "--filter", "@backslash/worker", "start"]
+CMD ["pnpm", "--filter", "@myeditor/worker", "start"]

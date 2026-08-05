@@ -32,7 +32,7 @@ import {
 import { AppHeader } from "@/components/AppHeader";
 import { PresenceAvatars } from "@/components/editor/PresenceAvatars";
 import { ShareDialog } from "@/components/editor/ShareDialog";
-import type { PresenceUser } from "@backslash/shared";
+import type { PresenceUser } from "@myeditor/shared";
 
 // ─── Types ──────────────────────────────────────────
 

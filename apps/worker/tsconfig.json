@@ -6,7 +6,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["../web/src/*"],
-      "@backslash/shared": ["../../packages/shared/src"]
+      "@myeditor/shared": ["../../packages/shared/src"]
     },
     "strict": true,
     "esModuleInterop": true,

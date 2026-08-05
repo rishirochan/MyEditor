@@ -12,7 +12,7 @@ import { withAuth } from "@/lib/auth/middleware";
 import { createProjectSchema } from "@/lib/utils/validation";
 import { findSharedProjectsByUser } from "@/lib/db/queries/projects";
 import * as storage from "@/lib/storage";
-import { MIME_TYPES } from "@backslash/shared";
+import { MIME_TYPES } from "@myeditor/shared";
 import { eq, and, desc, or, isNull, gt } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";

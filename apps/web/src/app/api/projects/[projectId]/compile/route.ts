@@ -11,7 +11,7 @@ import {
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import type { Engine } from "@backslash/shared";
+import type { Engine } from "@myeditor/shared";
 
 const VALID_ENGINES: Engine[] = [
   "auto",
@@ -91,7 +91,7 @@ export async function POST(
       // ── Pre-flight: verify compiler image exists ─────
       try {
         const docker = getDockerClient();
-        const compilerImage = process.env.COMPILER_IMAGE || "backslash-compiler";
+        const compilerImage = process.env.COMPILER_IMAGE || "myeditor-compiler";
         const images = await docker.listImages({
           filters: { reference: [compilerImage] },
         });

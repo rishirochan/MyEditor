@@ -7,7 +7,7 @@ import { isDedicatedWorkerHealthy, isWorkerExpectedInWeb } from "@/lib/compiler/
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import type { Engine } from "@backslash/shared";
+import type { Engine } from "@myeditor/shared";
 
 const VALID_ENGINES: Engine[] = [
   "auto",

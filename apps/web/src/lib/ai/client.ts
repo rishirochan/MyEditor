@@ -50,8 +50,8 @@ async function callOpenAiCompatible(
     };
 
     if (params.modelSettings.provider === "openrouter") {
-      headers["HTTP-Referer"] = process.env.APP_BASE_URL || "https://backslash.app";
-      headers["X-Title"] = "Backslash";
+      headers["HTTP-Referer"] = process.env.APP_BASE_URL || "http://localhost:3000";
+      headers["X-Title"] = "MyEditor";
     }
 
     const res = await fetch(`${trimTrailingSlash(baseUrl)}/chat/completions`, {

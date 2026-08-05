@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, type FormEvent } from "react";
 import { cn } from "@/lib/utils/cn";
 import { MessageCircle, Send, ChevronUp, ChevronDown } from "lucide-react";
-import type { ChatMessage } from "@backslash/shared";
+import type { ChatMessage } from "@myeditor/shared";
 
 // ─── Types ──────────────────────────────────────────
 

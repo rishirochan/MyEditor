@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
-import type { DocChange, CursorSelection } from "@backslash/shared";
+import type { DocChange, CursorSelection } from "@myeditor/shared";
 
 // ─── Types ──────────────────────────────────────────
 

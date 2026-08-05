@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { BuildStatus, ParsedLogEntry } from "@backslash/shared";
+import type { BuildStatus, ParsedLogEntry } from "@myeditor/shared";
 
 interface BuildState {
   isCompiling: boolean;

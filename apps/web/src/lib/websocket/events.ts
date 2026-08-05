@@ -1,11 +1,11 @@
-import type { ParsedLogEntry } from "@backslash/shared";
+import type { ParsedLogEntry } from "@myeditor/shared";
 
 // ─── Re-export shared event types ──────────────────
 
 export type {
   ServerToClientEvents,
   ClientToServerEvents,
-} from "@backslash/shared";
+} from "@myeditor/shared";
 
 // ─── Internal Build Update Payloads ────────────────
 

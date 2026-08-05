@@ -1,6 +1,6 @@
 import { Queue } from "bullmq";
 import IORedis, { type RedisOptions } from "ioredis";
-import type { Engine } from "@backslash/shared";
+import type { Engine } from "@myeditor/shared";
 
 export interface AsyncCompileJobData {
   jobId: string;

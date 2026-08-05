@@ -16,7 +16,7 @@ import { BuildLogs } from "@/components/editor/BuildLogs";
 import { ChatPanel } from "@/components/editor/ChatPanel";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { FileText } from "lucide-react";
-import type { PresenceUser, ChatMessage, CursorSelection, DocChange } from "@backslash/shared";
+import type { PresenceUser, ChatMessage, CursorSelection, DocChange } from "@myeditor/shared";
 
 // ─── Types ──────────────────────────────────────────
 

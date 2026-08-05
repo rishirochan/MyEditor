@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { ProjectFile } from "@backslash/shared";
+import type { ProjectFile } from "@myeditor/shared";
 
 export function useFileTree(
   projectId: string | null,

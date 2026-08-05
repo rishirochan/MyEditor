@@ -1,6 +1,6 @@
 import path from "path";
 import { z } from "zod";
-import { ALLOWED_EXTENSIONS, LIMITS } from "@backslash/shared";
+import { ALLOWED_EXTENSIONS, LIMITS } from "@myeditor/shared";
 
 export function validateFilePath(filePath: string): {
   valid: boolean;

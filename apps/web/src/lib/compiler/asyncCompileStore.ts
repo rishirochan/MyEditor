@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import type { BuildStatus, Engine, ParsedLogEntry } from "@backslash/shared";
+import type { BuildStatus, Engine, ParsedLogEntry } from "@myeditor/shared";
 
 const STORAGE_PATH = process.env.STORAGE_PATH || "/data";
 const ASYNC_COMPILE_ROOT = path.join(STORAGE_PATH, "async-compiles");

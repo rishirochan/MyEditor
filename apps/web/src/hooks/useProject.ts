@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { Project, ProjectFile, Build } from "@backslash/shared";
+import type { Project, ProjectFile, Build } from "@myeditor/shared";
 
 interface ProjectData {
   project: Project;

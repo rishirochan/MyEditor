@@ -1,6 +1,6 @@
 import { Queue, Worker } from "bullmq";
 import IORedis, { type RedisOptions } from "ioredis";
-import { LIMITS } from "@backslash/shared";
+import { LIMITS } from "@myeditor/shared";
 import fs from "fs/promises";
 
 import { runCompileContainer } from "./docker";
@@ -363,7 +363,7 @@ async function cleanExpiredAsyncCompileJobs(): Promise<void> {
   }
 }
 
-const RUNNER_KEY = "__backslash_async_compile_runner__" as const;
+const RUNNER_KEY = "__myeditor_async_compile_runner__" as const;
 
 function getRunnerInstance(): AsyncCompileRunner | null {
   return (
