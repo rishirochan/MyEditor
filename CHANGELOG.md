@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Backslash are documented here. The format is based on
+All notable changes to MyEditor are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -67,7 +67,7 @@ the new `docker-compose.yml` takes effect (a restart alone won't pick
 up the env-passthrough additions).
 
 1. **Set new env vars** before deploy:
-   - `APP_URL` — your public URL (e.g. `https://backslash.example.com`).
+   - `APP_URL` — your public URL (e.g. `https://myeditor.example.com`).
      Used to build absolute links in password-reset emails.
    - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM`
      — required for emails to actually send. Without them, reset links

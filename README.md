@@ -1,4 +1,4 @@
-<h1 align="center">\ Backslash</h1>
+<h1 align="center">MyEditor</h1>
 <p align="center"><strong>Self-hostable, open-source LaTeX editor with live PDF preview and a full REST API.</strong></p>
 <p align="center">Write beautiful documents with a modern editing experience — on your own infrastructure.</p>
 
@@ -49,8 +49,8 @@ https://github.com/user-attachments/assets/16e5fb58-f64b-47cc-a2a6-185f437c3f3b
 - A PostgreSQL database — either use the **built-in** Docker container or an **external** hosted instance (Neon, Supabase, Railway, your own server, etc.)
 
 ```bash
-git clone https://github.com/Manan-Santoki/Backslash.git
-cd Backslash
+git clone https://github.com/rishirochan/MyEditor.git
+cd MyEditor
 cp .env.example .env
 # (optional) edit .env to change SESSION_SECRET, PORT, etc.
 docker compose up -d
@@ -251,7 +251,7 @@ CUSTOM_AI_API_KEY=
 
 ## 🔌 REST API
 
-Backslash includes a full REST API for programmatic access. Generate an API key from the **Developer Settings** page in the dashboard, then use it in the `Authorization` header.
+MyEditor includes a full REST API for programmatic access. Generate an API key from the **Developer Settings** page in the dashboard, then use it in the `Authorization` header.
 
 ### Quick Start
 
@@ -328,7 +328,7 @@ Full interactive API documentation is available at `/dashboard/developers/docs` 
 ## 🏗️ Architecture
 
 ```
-backslash/
+myeditor/
 ├── apps/
 │   ├── web/              # Next.js 15 app (frontend + API)
 │   ├── ws/               # Standalone WebSocket server (Socket.IO + Redis pub/sub)
@@ -361,13 +361,13 @@ backslash/
 
 ## 🛠️ Development Setup
 
-If you want to contribute or run Backslash locally for development:
+If you want to contribute or run MyEditor locally for development:
 
 **1. Clone and install:**
 
 ```bash
-git clone https://github.com/Manan-Santoki/Backslash.git
-cd Backslash
+git clone https://github.com/rishirochan/MyEditor.git
+cd MyEditor
 ```
 
 **2. Start dev services (PostgreSQL + Redis):**
@@ -385,7 +385,7 @@ DATABASE_URL=postgresql://backslash:devpassword@localhost:5432/backslash
 REDIS_URL=redis://localhost:6379
 STORAGE_PATH=./data
 TEMPLATES_PATH=../../templates
-COMPILER_IMAGE=backslash-compiler
+COMPILER_IMAGE=myeditor-compiler
 SESSION_SECRET=dev-secret-change-in-production
 RUN_COMPILE_RUNNER_IN_WEB=false
 ```
@@ -429,7 +429,7 @@ If you prefer compile execution inside the web process during local development,
 
 ### LaTeX Engines
 
-Backslash supports the following LaTeX engines. Project default is `auto`, and one-shot or project-compilation API requests can override engine explicitly.
+MyEditor supports the following LaTeX engines. Project default is `auto`, and one-shot or project-compilation API requests can override engine explicitly.
 
 `auto` detection rules:
 - `luacode`, `directlua`, `luatextra` → `lualatex`
@@ -545,7 +545,7 @@ apps/web/src/
 
 ## 🗄️ Database Schema
 
-Backslash uses PostgreSQL with Drizzle ORM. The schema includes:
+MyEditor uses PostgreSQL with Drizzle ORM. The schema includes:
 
 - **users** — User accounts (email, name, password hash)
 - **sessions** — Server-side session records keyed by session ID (referenced from signed JWT cookies)
@@ -562,7 +562,7 @@ The database schema is automatically applied when deploying with Docker Compose.
 
 ## � Acknowledgments
 
-Backslash is built on the shoulders of incredible open-source projects. We're grateful to every maintainer and contributor behind them.
+MyEditor is built on the shoulders of incredible open-source projects. We're grateful to every maintainer and contributor behind them.
 
 ### Core Framework
 
