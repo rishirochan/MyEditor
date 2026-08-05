@@ -6,7 +6,7 @@ interface BuildStatusCompatState {
   inFlight: Promise<void> | null;
 }
 
-const STATE_KEY = "__backslash_build_status_compat_state__" as const;
+const STATE_KEY = "__myeditor_build_status_compat_state__" as const;
 
 function getState(): BuildStatusCompatState {
   const globalStore = globalThis as unknown as Record<string, BuildStatusCompatState | undefined>;

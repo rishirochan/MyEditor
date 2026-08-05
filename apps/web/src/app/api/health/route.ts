@@ -208,7 +208,7 @@ export async function GET() {
   // 6. Compiler image
   try {
     const docker = getDockerClient();
-    const compilerImage = process.env.COMPILER_IMAGE || "backslash-compiler";
+    const compilerImage = process.env.COMPILER_IMAGE || "myeditor-compiler";
     const images = await docker.listImages({
       filters: { reference: [compilerImage] },
     });

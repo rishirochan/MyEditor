@@ -1,4 +1,4 @@
-﻿-- Initial database setup for Backslash
+﻿-- Initial database setup for MyEditor
 -- This file runs when the PostgreSQL container is first created.
 --
 -- NOTE: All table/type/index DDL is managed by Drizzle ORM migrations

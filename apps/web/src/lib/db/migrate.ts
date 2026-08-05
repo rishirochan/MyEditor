@@ -16,7 +16,7 @@ interface MigrateState {
   promise: Promise<void> | null;
 }
 
-const STATE_KEY = "__backslash_migrate_state__" as const;
+const STATE_KEY = "__myeditor_migrate_state__" as const;
 
 function getState(): MigrateState {
   const g = globalThis as unknown as Record<string, MigrateState | undefined>;

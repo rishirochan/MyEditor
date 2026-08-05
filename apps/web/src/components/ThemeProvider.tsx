@@ -29,7 +29,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // Read persisted theme on mount
   useEffect(() => {
-    const stored = localStorage.getItem("backslash-theme") as Theme | null;
+    const stored = localStorage.getItem("myeditor-theme") as Theme | null;
     if (stored === "light" || stored === "dark") {
       setTheme(stored);
       document.documentElement.setAttribute("data-theme", stored);
@@ -39,7 +39,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next = prev === "dark" ? "light" : "dark";
-      localStorage.setItem("backslash-theme", next);
+      localStorage.setItem("myeditor-theme", next);
       document.documentElement.setAttribute("data-theme", next);
       return next;
     });

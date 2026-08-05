@@ -60,11 +60,11 @@ async function publishHeartbeat() {
 }
 
 async function bootstrap() {
-  console.log("Backslash Compilation Worker");
+  console.log("MyEditor Compilation Worker");
   console.log("============================");
   console.log(`Redis: ${REDIS_URL}`);
   console.log(`Database: ${process.env.DATABASE_URL ? "[configured]" : "[default]"}`);
-  console.log(`Compiler Image: ${process.env.COMPILER_IMAGE || "backslash-compiler"}`);
+  console.log(`Compiler Image: ${process.env.COMPILER_IMAGE || "myeditor-compiler"}`);
   console.log(`Max Concurrent Builds: ${process.env.MAX_CONCURRENT_BUILDS || "5"}`);
   console.log(`Compile Timeout: ${process.env.COMPILE_TIMEOUT || "120"}s`);
   console.log(`Heartbeat: key=${HEARTBEAT_KEY} interval=${HEARTBEAT_INTERVAL_MS}ms`);

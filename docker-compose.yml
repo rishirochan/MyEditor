@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: docker/texlive/Dockerfile
-    image: backslash-compiler
+    image: myeditor-compiler
     pull_policy: build
     entrypoint: ["true"]
     restart: "no"
@@ -65,7 +65,7 @@ services:
       - REDIS_URL=redis://backslash-redis:6379
       - STORAGE_PATH=/data/backslash
       - TEMPLATES_PATH=/app/templates
-      - COMPILER_IMAGE=backslash-compiler
+      - COMPILER_IMAGE=myeditor-compiler
       - COMPILE_MEMORY=${COMPILE_MEMORY:-1g}
       - COMPILE_CPUS=${COMPILE_CPUS:-1.5}
       - MAX_CONCURRENT_BUILDS=${MAX_CONCURRENT_BUILDS:-5}
@@ -116,7 +116,7 @@ services:
       - MIGRATE_RETRY_DELAY_SECONDS=${MIGRATE_RETRY_DELAY_SECONDS:-2}
       - REDIS_URL=redis://backslash-redis:6379
       - STORAGE_PATH=/data/backslash
-      - COMPILER_IMAGE=backslash-compiler
+      - COMPILER_IMAGE=myeditor-compiler
       - COMPILE_MEMORY=${COMPILE_MEMORY:-1g}
       - COMPILE_CPUS=${COMPILE_CPUS:-1.5}
       - MAX_CONCURRENT_BUILDS=${MAX_CONCURRENT_BUILDS:-5}

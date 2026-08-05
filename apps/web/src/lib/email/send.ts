@@ -32,7 +32,7 @@ function getTransporter(): Transporter | null {
 }
 
 function fromAddress(): string {
-  return process.env.SMTP_FROM || "Backslash <no-reply@localhost>";
+  return process.env.SMTP_FROM || "MyEditor <no-reply@localhost>";
 }
 
 interface SendArgs {
@@ -65,13 +65,13 @@ export async function sendPasswordResetEmail(
   to: string,
   resetUrl: string,
 ): Promise<void> {
-  const subject = "Reset your Backslash password";
+  const subject = "Reset your MyEditor password";
   const text =
-    `Someone (hopefully you) requested a password reset for your Backslash account.\n\n` +
+    `Someone (hopefully you) requested a password reset for your MyEditor account.\n\n` +
     `Open this link within 30 minutes to choose a new password:\n${resetUrl}\n\n` +
     `If you did not request this, you can ignore this email.`;
   const html =
-    `<p>Someone (hopefully you) requested a password reset for your Backslash account.</p>` +
+    `<p>Someone (hopefully you) requested a password reset for your MyEditor account.</p>` +
     `<p><a href="${resetUrl}">Reset your password</a> (valid for 30 minutes).</p>` +
     `<p>If you did not request this, you can ignore this email.</p>`;
   await sendMail({ to, subject, text, html });

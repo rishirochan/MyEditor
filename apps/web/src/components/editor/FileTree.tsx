@@ -418,15 +418,15 @@ function TreeNodeItem({
         onContextMenu={handleRightClick}
         onDragStart={(e) => {
           if (!node.file) return;
-          e.dataTransfer.setData("application/x-backslash-file-id", node.file.id);
-          e.dataTransfer.setData("application/x-backslash-file-path", node.file.path);
+          e.dataTransfer.setData("application/x-myeditor-file-id", node.file.id);
+          e.dataTransfer.setData("application/x-myeditor-file-path", node.file.path);
           e.dataTransfer.effectAllowed = "move";
           onDragStartInternal(node.file.id, node.file.path);
         }}
         onDragEnd={onDragEndInternal}
         onDragOver={(e) => {
           if (!node.isDirectory) return;
-          if (e.dataTransfer.types.includes("application/x-backslash-file-id")) {
+          if (e.dataTransfer.types.includes("application/x-myeditor-file-id")) {
             e.preventDefault();
             e.stopPropagation();
             e.dataTransfer.dropEffect = "move";
@@ -435,8 +435,8 @@ function TreeNodeItem({
         }}
         onDrop={(e) => {
           if (!node.isDirectory) return;
-          const fId = e.dataTransfer.getData("application/x-backslash-file-id");
-          const fPath = e.dataTransfer.getData("application/x-backslash-file-path");
+          const fId = e.dataTransfer.getData("application/x-myeditor-file-id");
+          const fPath = e.dataTransfer.getData("application/x-myeditor-file-path");
           if (fId && fPath) {
             e.preventDefault();
             e.stopPropagation();
@@ -895,7 +895,7 @@ export function FileTree({
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.dataTransfer.types.includes("application/x-backslash-file-id")) {
+    if (e.dataTransfer.types.includes("application/x-myeditor-file-id")) {
       e.dataTransfer.dropEffect = "move";
       setDropTargetPath(null); // Clear folder highlight when over root area
     } else {
@@ -911,8 +911,8 @@ export function FileTree({
       setIsDraggingOver(false);
 
       // Internal file move — drop on root area moves file to top level
-      const draggedId = e.dataTransfer.getData("application/x-backslash-file-id");
-      const draggedPath = e.dataTransfer.getData("application/x-backslash-file-path");
+      const draggedId = e.dataTransfer.getData("application/x-myeditor-file-id");
+      const draggedPath = e.dataTransfer.getData("application/x-myeditor-file-path");
       if (draggedId && draggedPath) {
         setDropTargetPath(null);
         const fileName = draggedPath.split("/").pop()!;

@@ -258,7 +258,7 @@ subscriber.on("connect", () => {
 const httpServer = createServer((_req, res) => {
   // Health check endpoint
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ status: "ok", service: "backslash-ws" }));
+  res.end(JSON.stringify({ status: "ok", service: "myeditor-ws" }));
 });
 
 const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
@@ -814,7 +814,7 @@ function handleFileUpdate(message: string) {
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log("");
   console.log("╔══════════════════════════════════════╗");
-  console.log("║   Backslash WebSocket Server         ║");
+  console.log("║   MyEditor WebSocket Server          ║");
   console.log("╠══════════════════════════════════════╣");
   console.log(`║  Port:     ${String(PORT).padEnd(25)}║`);
   console.log(`║  Redis:    ${REDIS_URL.padEnd(25)}║`);
