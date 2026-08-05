@@ -410,7 +410,7 @@ COMPILER_IMAGE=myeditor-compiler
 Local dev needs Docker Desktop (or Colima) with file sharing enabled for that
 directory. On Windows, use WSL2 — the compile path assumes a POSIX Docker socket.
 
-**3. One-time setup** (installs deps, builds the compiler image, starts Postgres + Redis, pushes the schema):
+**3. One-time setup** (installs deps, builds the compiler image, starts Postgres + Redis, runs migrations):
 
 ```bash
 pnpm setup
@@ -430,10 +430,15 @@ If you prefer compile execution inside the web process during local development,
 
 **5.** Open [http://localhost:3000](http://localhost:3000)
 
+> `pnpm setup` runs `db:migrate`, not `db:push`. `db:push` writes `schema.ts`
+> straight to the database without recording a migration, so a database built
+> that way has no history — `db:migrate` will then refuse to run until you adopt
+> the existing schema with `DRIZZLE_BASELINE=latest`.
+
 | Script | What it does |
 |---|---|
 | `pnpm dev` | Dev services + web + ws + worker, one terminal |
-| `pnpm setup` | One-time: install, build compiler image, start services, push schema |
+| `pnpm setup` | One-time: install, build compiler image, start services, run migrations |
 | `pnpm services` | Just Postgres + Redis (`-d`, waits for healthy) |
 | `pnpm stop` | Stop the dev containers |
 

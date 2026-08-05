@@ -120,6 +120,7 @@ function extractAssistantText(rawBody: string, contentType: string | null): stri
 
 export async function completeWithCodexCli(params: {
   model: string;
+  effort?: string | null;
   systemPrompt: string;
   userPrompt: string;
 }): Promise<string> {
@@ -128,6 +129,28 @@ export async function completeWithCodexCli(params: {
   const timeout = setTimeout(() => controller.abort(), CODEX_TIMEOUT_MS);
 
   try {
+    const effort = params.effort?.trim();
+    const requestBody: Record<string, unknown> = {
+      model: params.model,
+      stream: true,
+      store: false,
+      instructions: params.systemPrompt,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: params.userPrompt,
+            },
+          ],
+        },
+      ],
+    };
+    if (effort) {
+      requestBody.reasoning = { effort };
+    }
+
     const res = await fetch(CODEX_RESPONSES_URL, {
       method: "POST",
       headers: {
@@ -139,34 +162,21 @@ export async function completeWithCodexCli(params: {
         Accept: "text/event-stream",
         "session_id": randomUUID(),
       },
-      body: JSON.stringify({
-        model: params.model,
-        stream: true,
-        store: false,
-        instructions: params.systemPrompt,
-        input: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: params.userPrompt,
-              },
-            ],
-          },
-        ],
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
 
-    const body = await res.text().catch(() => "");
+    const responseBody = await res.text().catch(() => "");
     if (!res.ok) {
       throw new Error(
-        `Codex request failed (${res.status}): ${body || res.statusText}. If login expired, run Log in in Settings or \`codex login\`.`
+        `Codex request failed (${res.status}): ${responseBody || res.statusText}. If login expired, run Log in in Settings or \`codex login\`.`
       );
     }
 
-    const text = extractAssistantText(body, res.headers.get("content-type"));
+    const text = extractAssistantText(
+      responseBody,
+      res.headers.get("content-type")
+    );
     if (!text.trim()) {
       throw new Error("Codex returned no completion content");
     }

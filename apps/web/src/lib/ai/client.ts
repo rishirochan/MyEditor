@@ -157,6 +157,7 @@ async function callCliProvider(
   if (params.modelSettings.provider === "claude-cli") {
     return completeWithClaudeCli({
       model: params.modelSettings.model,
+      effort: params.modelSettings.effort,
       systemPrompt: params.systemPrompt,
       userPrompt: params.userPrompt,
     });
@@ -164,6 +165,7 @@ async function callCliProvider(
 
   return completeWithCodexCli({
     model: params.modelSettings.model,
+    effort: params.modelSettings.effort,
     systemPrompt: params.systemPrompt,
     userPrompt: params.userPrompt,
   });

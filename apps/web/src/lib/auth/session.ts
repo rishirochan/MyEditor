@@ -88,5 +88,6 @@ export async function setSessionCookie(token: string) {
 
 export async function clearSessionCookie() {
   const cookieStore = await cookies();
-  cookieStore.delete("session");
+  // Must match the path used in setSessionCookie or logout leaves it behind.
+  cookieStore.delete({ name: "session", path: "/" });
 }

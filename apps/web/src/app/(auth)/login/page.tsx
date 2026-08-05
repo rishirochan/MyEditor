@@ -4,9 +4,32 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { PasswordInput } from "@/components/ui/password-input";
 
+function safeRedirectPath(value: string | null): string {
+  if (!value) return "/dashboard";
+  if (!value.startsWith("/")) return "/dashboard";
+
+  const baseUrl = new URL("http://localhost");
+  let redirectUrl: URL;
+  try {
+    redirectUrl = new URL(value, baseUrl);
+  } catch {
+    return "/dashboard";
+  }
+
+  if (redirectUrl.origin !== baseUrl.origin) return "/dashboard";
+  if (
+    redirectUrl.pathname.startsWith("/login") ||
+    redirectUrl.pathname.startsWith("/register")
+  ) {
+    return "/dashboard";
+  }
+  const path = `${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`;
+  // "/..//evil.com" normalizes to a protocol-relative URL — same origin here,
+  // off-site once assigned to window.location.
+  return path.startsWith("//") ? "/dashboard" : path;
+}
+
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -14,6 +37,12 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
+
+    // Read from the DOM so browser autofill (Arc/Chrome) is included.
+    // Controlled React state alone often misses autofilled values.
+    const formData = new FormData(e.currentTarget);
+    const email = String(formData.get("email") || "").trim();
+    const password = String(formData.get("password") || "");
 
     try {
       const res = await fetch("/api/auth/login", {
@@ -29,7 +58,10 @@ export default function LoginPage() {
         return;
       }
 
-      window.location.href = "/dashboard";
+      const redirectParam = new URLSearchParams(window.location.search).get(
+        "redirect"
+      );
+      window.location.href = safeRedirectPath(redirectParam);
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -59,11 +91,11 @@ export default function LoginPage() {
           </label>
           <input
             id="email"
+            name="email"
             type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
             required
             placeholder="you@example.com"
+            autoComplete="email"
             className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
           />
         </div>
@@ -77,8 +109,7 @@ export default function LoginPage() {
           </label>
           <PasswordInput
             id="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            name="password"
             required
             placeholder="Enter your password"
             autoComplete="current-password"

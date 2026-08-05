@@ -261,10 +261,7 @@ async function detectCodex(): Promise<CliProviderStatus> {
 export async function detectCliStatus(): Promise<CliStatusSnapshot> {
   const [claude, codex] = await Promise.all([detectClaude(), detectCodex()]);
   const { listCliModels } = await import("@/lib/ai/cliModels");
-  const models = await listCliModels({
-    claudeBinaryPath: claude.binaryPath,
-    codexBinaryPath: codex.binaryPath,
-  });
+  const models = await listCliModels({ codexBinaryPath: codex.binaryPath });
   return { claude, codex, models };
 }
 

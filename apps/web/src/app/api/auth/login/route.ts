@@ -65,6 +65,16 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Login error:", error);
+    // 53300 = too_many_connections; the message text is version/locale dependent.
+    if ((error as { code?: string })?.code === "53300") {
+      return NextResponse.json(
+        {
+          error:
+            "Server is temporarily overloaded. Wait a few seconds and try again.",
+        },
+        { status: 503, headers: { "Retry-After": "5" } }
+      );
+    }
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

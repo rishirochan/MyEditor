@@ -12,8 +12,6 @@ interface PageProps {
 export default function ResetPasswordPage({ params }: PageProps) {
   const { token } = use(params);
   const router = useRouter();
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -22,11 +20,15 @@ export default function ResetPasswordPage({ params }: PageProps) {
     e.preventDefault();
     setError("");
 
-    if (password.length < 8) {
+    const formData = new FormData(e.currentTarget);
+    const nextPassword = String(formData.get("password") || "");
+    const nextConfirm = String(formData.get("confirm") || "");
+
+    if (nextPassword.length < 8) {
       setError("Password must be at least 8 characters.");
       return;
     }
-    if (password !== confirm) {
+    if (nextPassword !== nextConfirm) {
       setError("Passwords do not match.");
       return;
     }
@@ -36,7 +38,7 @@ export default function ResetPasswordPage({ params }: PageProps) {
       const res = await fetch("/api/auth/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ token, password: nextPassword }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -82,8 +84,7 @@ export default function ResetPasswordPage({ params }: PageProps) {
               </label>
               <PasswordInput
                 id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                name="password"
                 required
                 minLength={8}
                 placeholder="At least 8 characters"
@@ -100,8 +101,7 @@ export default function ResetPasswordPage({ params }: PageProps) {
               </label>
               <PasswordInput
                 id="confirm"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
+                name="confirm"
                 required
                 minLength={8}
                 placeholder="Re-enter your password"

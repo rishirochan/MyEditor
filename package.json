@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "setup": "pnpm install && docker compose build compiler-image && pnpm services && pnpm --filter @myeditor/web db:push",
+    "setup": "pnpm install && docker compose build compiler-image && pnpm services && pnpm --filter @myeditor/web db:migrate",
     "services": "docker compose -p myeditor-dev -f docker-compose.dev.yml up -d --wait",
     "dev": "pnpm services && pnpm -r --parallel dev",
     "stop": "docker compose -p myeditor-dev -f docker-compose.dev.yml down"

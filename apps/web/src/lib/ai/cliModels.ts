@@ -1,43 +1,20 @@
-import { readFile } from "fs/promises";
 import {
-  resolveClaudeBinary,
   resolveCodexBinary,
   runCommandCapture,
 } from "@/lib/ai/cliDetect";
+import {
+  CLAUDE_LATEST_FAMILY,
+  CODEX_LATEST_FALLBACK,
+  EFFORT_DESCRIPTIONS,
+  type CliModelOption,
+  type CliReasoningLevel,
+} from "@/lib/ai/cliModelCatalog";
 
-export interface CliModelOption {
-  id: string;
-  label: string;
-}
+export type { CliModelOption, CliReasoningLevel };
 
-const CLAUDE_ALIASES: CliModelOption[] = [
-  { id: "sonnet", label: "sonnet (latest)" },
-  { id: "opus", label: "opus (latest)" },
-  { id: "haiku", label: "haiku (latest)" },
-  { id: "fable", label: "fable (latest)" },
-];
+const PLANETARY_RE = /^(gpt-(\d+(?:\.\d+)?))-(sol|terra|luna)$/i;
+const FAMILY_ORDER = ["sol", "terra", "luna"] as const;
 
-const CLAUDE_FALLBACK_IDS = [
-  "claude-sonnet-4-6",
-  "claude-sonnet-5",
-  "claude-opus-4-6",
-  "claude-opus-4-8",
-  "claude-opus-5",
-  "claude-fable-5",
-  "claude-haiku-4-5",
-];
-
-const CODEX_FALLBACK_IDS = [
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.2",
-];
-
-let claudeModelsCache: { at: number; models: CliModelOption[] } | null = null;
 let codexModelsCache: { at: number; models: CliModelOption[] } | null = null;
 const CACHE_TTL_MS = 5 * 60_000;
 
@@ -48,23 +25,163 @@ function uniqueOptions(options: CliModelOption[]): CliModelOption[] {
     const id = option.id.trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    out.push({ id, label: option.label.trim() || id });
+    out.push({
+      id,
+      label: option.label.trim() || id,
+      defaultEffort: option.defaultEffort,
+      efforts: option.efforts,
+    });
   }
   return out;
 }
 
-function extractClaudeIdsFromBinary(buffer: Buffer): string[] {
-  const text = buffer.toString("latin1");
-  const re =
-    /claude-(?:sonnet|opus|haiku|fable)-[0-9]+(?:\.[0-9]+)?(?:-[0-9]+)?/g;
-  const found = new Set<string>();
-  for (const match of text.matchAll(re)) {
-    const id = match[0];
-    if (/-\d{8}/.test(id)) continue;
-    if (id.endsWith("-v1")) continue;
-    found.add(id);
+function compareVersion(a: string, b: string): number {
+  const as = a.split(".").map((part) => Number(part) || 0);
+  const bs = b.split(".").map((part) => Number(part) || 0);
+  const len = Math.max(as.length, bs.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (as[i] ?? 0) - (bs[i] ?? 0);
+    if (diff !== 0) return diff;
   }
-  return [...found].sort((a, b) => a.localeCompare(b));
+  return 0;
+}
+
+function withEffortDescriptions(
+  efforts: CliReasoningLevel[]
+): CliReasoningLevel[] {
+  return efforts.map((level) => ({
+    ...level,
+    description:
+      level.description || EFFORT_DESCRIPTIONS[level.effort] || undefined,
+  }));
+}
+
+function displayNameForPlanetary(slug: string, displayName?: string): string {
+  if (displayName?.trim()) {
+    // Prefer CLI display name, normalize "GPT-5.6-Sol" → "GPT-5.6 Sol".
+    return displayName.trim().replace(/-(Sol|Terra|Luna)$/i, " $1");
+  }
+  const match = slug.match(PLANETARY_RE);
+  if (!match) return slug;
+  const version = match[2]!;
+  const member = match[3]!;
+  return `GPT-${version} ${member.charAt(0).toUpperCase()}${member.slice(1).toLowerCase()}`;
+}
+
+function parseReasoningLevels(raw: unknown): {
+  defaultEffort?: string;
+  efforts?: CliReasoningLevel[];
+} {
+  if (!raw || typeof raw !== "object") return {};
+  const record = raw as Record<string, unknown>;
+  const defaultEffort =
+    (typeof record.default_reasoning_level === "string" &&
+      record.default_reasoning_level) ||
+    (typeof record.defaultReasoningEffort === "string" &&
+      record.defaultReasoningEffort) ||
+    undefined;
+
+  const levelsRaw =
+    record.supported_reasoning_levels ?? record.supportedReasoningEfforts;
+  const efforts: CliReasoningLevel[] = [];
+  if (Array.isArray(levelsRaw)) {
+    for (const item of levelsRaw) {
+      if (typeof item === "string") {
+        efforts.push({
+          effort: item,
+          description: EFFORT_DESCRIPTIONS[item],
+        });
+        continue;
+      }
+      if (!item || typeof item !== "object") continue;
+      const level = item as Record<string, unknown>;
+      const effort =
+        (typeof level.effort === "string" && level.effort) ||
+        (typeof level.value === "string" && level.value) ||
+        null;
+      if (!effort) continue;
+      efforts.push({
+        effort,
+        description:
+          (typeof level.description === "string" && level.description) ||
+          EFFORT_DESCRIPTIONS[effort],
+      });
+    }
+  }
+
+  return {
+    defaultEffort,
+    efforts: efforts.length > 0 ? efforts : undefined,
+  };
+}
+
+/** Keep only the highest gpt-X.Y sol/terra/luna family. */
+export function filterLatestCodexFamily(
+  models: CliModelOption[]
+): CliModelOption[] {
+  const planetary: Array<{
+    option: CliModelOption;
+    version: string;
+    member: string;
+  }> = [];
+
+  for (const option of models) {
+    const match = option.id.match(PLANETARY_RE);
+    if (!match) continue;
+    planetary.push({
+      option,
+      version: match[2]!,
+      member: match[3]!.toLowerCase(),
+    });
+  }
+
+  if (planetary.length === 0) {
+    return CODEX_LATEST_FALLBACK.map((option) => ({
+      ...option,
+      efforts: option.efforts ? withEffortDescriptions(option.efforts) : [],
+    }));
+  }
+
+  let latestVersion = planetary[0]!.version;
+  for (const item of planetary) {
+    if (compareVersion(item.version, latestVersion) > 0) {
+      latestVersion = item.version;
+    }
+  }
+
+  const latest = planetary.filter((item) => item.version === latestVersion);
+  const byMember = new Map(latest.map((item) => [item.member, item.option]));
+
+  const ordered: CliModelOption[] = [];
+  for (const member of FAMILY_ORDER) {
+    const option = byMember.get(member);
+    if (!option) continue;
+    const fallback = CODEX_LATEST_FALLBACK.find((item) =>
+      item.id.endsWith(`-${member}`)
+    );
+    const efforts =
+      option.efforts && option.efforts.length > 0
+        ? withEffortDescriptions(option.efforts)
+        : fallback?.efforts
+          ? withEffortDescriptions(fallback.efforts)
+          : [];
+    ordered.push({
+      ...option,
+      label: displayNameForPlanetary(option.id, option.label),
+      defaultEffort:
+        option.defaultEffort ||
+        fallback?.defaultEffort ||
+        (member === "sol" ? "low" : "medium"),
+      efforts,
+    });
+  }
+
+  return ordered.length > 0
+    ? ordered
+    : CODEX_LATEST_FALLBACK.map((option) => ({
+        ...option,
+        efforts: option.efforts ? withEffortDescriptions(option.efforts) : [],
+      }));
 }
 
 function parseFirstJsonValue(raw: string): unknown {
@@ -101,33 +218,14 @@ function parseFirstJsonValue(raw: string): unknown {
   }
 }
 
-export async function listClaudeCliModels(
-  binaryPath?: string | null
-): Promise<CliModelOption[]> {
-  const now = Date.now();
-  if (claudeModelsCache && now - claudeModelsCache.at < CACHE_TTL_MS) {
-    return claudeModelsCache.models;
-  }
-
-  let ids: string[] = [];
-  try {
-    const resolved = binaryPath || (await resolveClaudeBinary());
-    const buffer = await readFile(resolved);
-    ids = extractClaudeIdsFromBinary(buffer);
-  } catch {
-    ids = [...CLAUDE_FALLBACK_IDS];
-  }
-
-  if (ids.length === 0) {
-    ids = [...CLAUDE_FALLBACK_IDS];
-  }
-
-  const models = uniqueOptions([
-    ...CLAUDE_ALIASES,
-    ...ids.map((id) => ({ id, label: id })),
-  ]);
-  claudeModelsCache = { at: now, models };
-  return models;
+// ponytail: curated constant, not read from the CLI. Scanning the Claude
+// binary was a multi-100MB read on every settings load; bump
+// CLAUDE_LATEST_FAMILY when a new family ships.
+export async function listClaudeCliModels(): Promise<CliModelOption[]> {
+  return CLAUDE_LATEST_FAMILY.map((option) => ({
+    ...option,
+    efforts: option.efforts ? [...option.efforts] : [],
+  }));
 }
 
 function parseCodexModels(raw: string): CliModelOption[] {
@@ -159,7 +257,13 @@ function parseCodexModels(raw: string): CliModelOption[] {
       (typeof record.display_name === "string" && record.display_name) ||
       (typeof record.name === "string" && record.name) ||
       id;
-    options.push({ id, label });
+    const reasoning = parseReasoningLevels(record);
+    options.push({
+      id,
+      label,
+      defaultEffort: reasoning.defaultEffort,
+      efforts: reasoning.efforts,
+    });
   }
 
   return uniqueOptions(options);
@@ -189,20 +293,18 @@ export async function listCodexCliModels(
     models = [];
   }
 
-  if (models.length === 0) {
-    models = CODEX_FALLBACK_IDS.map((id) => ({ id, label: id }));
-  }
-
-  codexModelsCache = { at: now, models };
-  return models;
+  const filtered = filterLatestCodexFamily(
+    models.length > 0 ? models : CODEX_LATEST_FALLBACK
+  );
+  codexModelsCache = { at: now, models: filtered };
+  return filtered;
 }
 
 export async function listCliModels(params: {
-  claudeBinaryPath?: string | null;
   codexBinaryPath?: string | null;
 }): Promise<{ claude: CliModelOption[]; codex: CliModelOption[] }> {
   const [claude, codex] = await Promise.all([
-    listClaudeCliModels(params.claudeBinaryPath),
+    listClaudeCliModels(),
     listCodexCliModels(params.codexBinaryPath),
   ]);
   return { claude, codex };

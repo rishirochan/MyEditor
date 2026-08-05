@@ -24,7 +24,9 @@ Keep feature code close to its runtime module, and move cross-app contracts to `
 - `pnpm --filter @myeditor/ws build`: compile WS TypeScript to `dist/`.
 - `pnpm --filter @myeditor/web lint`: run ESLint (Next.js).
 - `pnpm --filter @myeditor/web typecheck`: strict TS check.
-- `pnpm --filter @myeditor/web db:push`: push Drizzle schema changes.
+- `pnpm --filter @myeditor/web db:migrate`: apply pending Drizzle migrations.
+- `pnpm --filter @myeditor/web db:generate`: generate a migration from `schema.ts` changes.
+- `pnpm --filter @myeditor/web db:push`: write `schema.ts` straight to the DB, no migration recorded (local iteration only).
 
 ## Coding Style & Naming Conventions
 Use TypeScript with strict typing and follow existing style: 2-space indentation, semicolons, and double quotes.
