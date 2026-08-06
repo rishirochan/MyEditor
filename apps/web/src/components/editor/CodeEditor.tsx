@@ -324,6 +324,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
 
       let view: import("@codemirror/view").EditorView | null = null;
       let detachPointerDown: (() => void) | null = null;
+      let cancelled = false;
 
       async function initEditor() {
         const { EditorState, StateEffect, StateField, Transaction } = await import("@codemirror/state");
@@ -355,7 +356,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
         const { stex } = await import("@codemirror/legacy-modes/mode/stex");
         const { RangeSetBuilder } = await import("@codemirror/state");
 
-        if (!containerRef.current) return;
+        if (cancelled || !containerRef.current) return;
 
         editorViewClassRef.current = EditorView;
 
@@ -751,6 +752,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
       initEditor();
 
       return () => {
+        cancelled = true;
         if (detachPointerDown) {
           detachPointerDown();
           detachPointerDown = null;
@@ -759,8 +761,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
           cancelAnimationFrame(cursorEmitRafRef.current);
           cursorEmitRafRef.current = null;
         }
-        if (viewRef.current) {
-          viewRef.current.destroy();
+        if (view) {
+          view.destroy();
+        }
+        if (viewRef.current === view) {
           viewRef.current = null;
         }
       };
