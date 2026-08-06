@@ -72,11 +72,13 @@ export const createFileSchema = z.object({
   path: z.string().min(1, "Path is required").max(1000),
   content: z.string().optional(),
   isDirectory: z.boolean().optional(),
+  isDocument: z.boolean().optional(),
 });
 
 export const updateFileSchema = z.object({
   content: z.string(),
   autoCompile: z.boolean().optional().default(true),
+  mainFile: z.string().max(1000).optional(),
 });
 
 export const renameFileSchema = z.object({

@@ -58,8 +58,8 @@ interface DocChange {
 
 interface ServerToClientEvents {
   "self:identity": (data: { userId: string; name: string; email: string; color: string }) => void;
-  "build:status": (data: { projectId: string; buildId: string; status: "queued" | "compiling"; triggeredByUserId?: string | null }) => void;
-  "build:complete": (data: { projectId: string; buildId: string; status: string; pdfUrl: string | null; logs: string; durationMs: number; errors: any[]; triggeredByUserId?: string | null }) => void;
+  "build:status": (data: { projectId: string; buildId: string; mainFile: string; status: "queued" | "compiling"; triggeredByUserId?: string | null }) => void;
+  "build:complete": (data: { projectId: string; buildId: string; mainFile: string; status: string; pdfUrl: string | null; logs: string; durationMs: number; errors: any[]; triggeredByUserId?: string | null }) => void;
   "presence:users": (data: { users: PresenceUser[] }) => void;
   "presence:joined": (data: { user: PresenceUser }) => void;
   "presence:left": (data: { userId: string }) => void;
@@ -705,6 +705,7 @@ function handleBuildUpdate(message: string) {
     io.to(userRoom).to(projectRoom).emit("build:complete", {
       projectId: payload.projectId,
       buildId: payload.buildId,
+      mainFile: payload.mainFile,
       status: payload.status,
       pdfUrl: payload.pdfUrl ?? null,
       logs: payload.logs ?? "",
@@ -716,6 +717,7 @@ function handleBuildUpdate(message: string) {
     io.to(userRoom).to(projectRoom).emit("build:status", {
       projectId: payload.projectId,
       buildId: payload.buildId,
+      mainFile: payload.mainFile,
       status: payload.status,
       triggeredByUserId,
     });

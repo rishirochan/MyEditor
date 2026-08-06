@@ -27,6 +27,7 @@ interface ProjectFile {
   mimeType: string | null;
   sizeBytes: number | null;
   isDirectory: boolean | null;
+  isDocument: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,6 +38,7 @@ interface Build {
   userId: string;
   status: string;
   engine: string;
+  mainFile: string;
   logs: string | null;
   durationMs: number | null;
   pdfPath: string | null;
@@ -130,7 +132,15 @@ export function EditorLayout({
 
   const [currentUser, setCurrentUser] = useState<CurrentUser>(initialCurrentUser);
   const [files, setFiles] = useState<ProjectFile[]>(initialFiles);
-  const [mainFilePath, setMainFilePath] = useState(project.mainFile);
+  const initialDocument =
+    initialFiles.find((file) => file.isDocument && file.path === project.mainFile) ??
+    initialFiles.find((file) => file.isDocument) ??
+    null;
+  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(
+    initialDocument?.id ?? null
+  );
+  const mainFilePath =
+    files.find((file) => file.id === activeDocumentId)?.path ?? null;
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [activeFileContent, setActiveFileContent] = useState<string>("");
@@ -141,17 +151,18 @@ export function EditorLayout({
     if (s === "queued" || s === "compiling") return "idle";
     return s ?? "idle";
   })();
-  const initialBuildMaybeRunning =
-    initialBuild?.status === "queued" || initialBuild?.status === "compiling";
-
   const [compiling, setCompiling] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(
     initialBuild?.status === "success"
       ? shareToken
-        ? `/api/projects/${project.id}/pdf?t=${Date.now()}&share=${encodeURIComponent(
+        ? `/api/projects/${project.id}/pdf?mainFile=${encodeURIComponent(
+            project.mainFile
+          )}&t=${Date.now()}&share=${encodeURIComponent(
             shareToken
           )}`
-        : `/api/projects/${project.id}/pdf?t=${Date.now()}`
+        : `/api/projects/${project.id}/pdf?mainFile=${encodeURIComponent(
+            project.mainFile
+          )}&t=${Date.now()}`
       : null
   );
   const [buildStatus, setBuildStatus] = useState(initialBuildStatus);
@@ -183,6 +194,7 @@ export function EditorLayout({
   // Build currently owned by this editor session — ignore WS/poll events for others.
   // "pending" means we started a compile but don't have the server buildId yet.
   const currentBuildIdRef = useRef<string | null>(null);
+  const currentBuildMainFileRef = useRef<string | null>(null);
   // When a save+compile is requested while already compiling, set this flag.
   // After the current build completes successfully, we'll trigger a recompile.
   const pendingRecompileRef = useRef(false);
@@ -240,9 +252,15 @@ export function EditorLayout({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoOpenedMainRef = useRef(false);
   const fileLoadRetriesRef = useRef<Map<string, number>>(new Map());
+  const filesRef = useRef(initialFiles);
+  filesRef.current = files;
 
   const activeFileIdRef = useRef<string | null>(null);
   activeFileIdRef.current = activeFileId;
+  const activeDocumentIdRef = useRef<string | null>(activeDocumentId);
+  activeDocumentIdRef.current = activeDocumentId;
+  const activeDocumentPathRef = useRef<string | null>(mainFilePath);
+  activeDocumentPathRef.current = mainFilePath;
 
   const withShareToken = useCallback(
     (url: string) => {
@@ -357,6 +375,8 @@ export function EditorLayout({
   const resetCompileState = useCallback(() => {
     compilingRef.current = false;
     currentBuildIdRef.current = null;
+    currentBuildMainFileRef.current = null;
+    pendingRecompileRef.current = false;
     setCompiling(false);
     setPdfLoading(false);
     clearAllPolling();
@@ -374,6 +394,7 @@ export function EditorLayout({
   const beginCompileTracking = useCallback((buildId?: string | null) => {
     currentBuildIdRef.current =
       typeof buildId === "string" && buildId.length > 0 ? buildId : "pending";
+    currentBuildMainFileRef.current = activeDocumentPathRef.current;
   }, []);
 
   const adoptBuildIdIfPending = useCallback((buildId: string | null | undefined) => {
@@ -458,12 +479,17 @@ export function EditorLayout({
 
   const startBuildPolling = useCallback(() => {
     clearAllPolling();
+    const mainFile = currentBuildMainFileRef.current;
+    if (!mainFile) return;
 
     pollIntervalRef.current = setInterval(async () => {
       try {
-        const logsRes = await fetch(withShareToken(`/api/projects/${project.id}/logs`), {
-          cache: "no-store",
-        });
+        const logsRes = await fetch(
+          withShareToken(
+            `/api/projects/${project.id}/logs?mainFile=${encodeURIComponent(mainFile)}`
+          ),
+          { cache: "no-store" }
+        );
         if (!logsRes.ok) return;
 
         const logsData = await logsRes.json();
@@ -496,7 +522,13 @@ export function EditorLayout({
           setBuildErrors(logsData.errors ?? []);
 
           if (build.status === "success") {
-            setPdfUrl(withShareToken(`/api/projects/${project.id}/pdf?t=${Date.now()}`));
+            setPdfUrl(
+              withShareToken(
+                `/api/projects/${project.id}/pdf?mainFile=${encodeURIComponent(
+                  mainFile
+                )}&t=${Date.now()}`
+              )
+            );
             restoreViewPositionsAfterBuild();
 
             // If file was changed during build, recompile
@@ -507,6 +539,8 @@ export function EditorLayout({
               saveViewPositionsBeforeBuild();
               fetch(withShareToken(`/api/projects/${project.id}/compile`), {
                 method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mainFile }),
               })
                 .then(async (res) => {
                   if (res.ok) {
@@ -577,17 +611,27 @@ export function EditorLayout({
     withShareToken,
   ]);
 
-  // ─── Check for stale in-progress build on mount ───
-  // If the DB had a queued/compiling build, poll once to see if it's still running.
+  // ─── Active document build ────────────────────────
   useEffect(() => {
-    if (!initialBuildMaybeRunning) return;
+    resetCompileState();
+    setPdfUrl(null);
+    setBuildStatus("idle");
+    setBuildLogs("");
+    setBuildDuration(null);
+    setBuildErrors([]);
+    if (!mainFilePath) return;
 
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(withShareToken(`/api/projects/${project.id}/logs`), {
-          cache: "no-store",
-        });
+        const res = await fetch(
+          withShareToken(
+            `/api/projects/${project.id}/logs?mainFile=${encodeURIComponent(
+              mainFilePath
+            )}`
+          ),
+          { cache: "no-store" }
+        );
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const build = data.build;
@@ -595,8 +639,8 @@ export function EditorLayout({
         if (cancelled) return;
 
         if (build.status === "queued" || build.status === "compiling") {
-          // Build is actually still running — start tracking it
           currentBuildIdRef.current = build.id ?? null;
+          currentBuildMainFileRef.current = mainFilePath;
           compilingRef.current = true;
           setCompiling(true);
           setBuildStatus(build.status);
@@ -607,7 +651,13 @@ export function EditorLayout({
           setBuildLogs(build.logs ?? "");
           setBuildDuration(build.durationMs);
           setBuildErrors(data.errors ?? []);
-          setPdfUrl(withShareToken(`/api/projects/${project.id}/pdf?t=${Date.now()}`));
+          setPdfUrl(
+            withShareToken(
+              `/api/projects/${project.id}/pdf?mainFile=${encodeURIComponent(
+                mainFilePath
+              )}&t=${Date.now()}`
+            )
+          );
         } else if (build.status === "error" || build.status === "timeout") {
           setBuildStatus(build.status);
           setBuildLogs(build.logs ?? "");
@@ -626,8 +676,7 @@ export function EditorLayout({
     })();
 
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mainFilePath, project.id, resetCompileState, startBuildPolling, withShareToken]);
 
   // ─── WebSocket Integration ────────────────────────
 
@@ -648,6 +697,8 @@ export function EditorLayout({
       }
     },
     onBuildStatus: (data) => {
+      if (data.mainFile !== activeDocumentPathRef.current) return;
+      currentBuildMainFileRef.current = data.mainFile;
       if (currentBuildIdRef.current === "pending") {
         adoptBuildIdIfPending(data.buildId);
       } else if (compilingRef.current && !isCurrentBuild(data.buildId)) {
@@ -664,6 +715,7 @@ export function EditorLayout({
       setPdfLoading(true);
     },
     onBuildComplete: (data) => {
+      if (data.mainFile !== activeDocumentPathRef.current) return;
       if (currentBuildIdRef.current === "pending") return;
       if (!isCurrentBuild(data.buildId)) return;
 
@@ -676,7 +728,13 @@ export function EditorLayout({
       setBuildErrors((data.errors as LogError[]) ?? []);
 
       if (data.status === "success") {
-        setPdfUrl(withShareToken(`/api/projects/${project.id}/pdf?t=${Date.now()}`));
+        setPdfUrl(
+          withShareToken(
+            `/api/projects/${project.id}/pdf?mainFile=${encodeURIComponent(
+              data.mainFile
+            )}&t=${Date.now()}`
+          )
+        );
         restoreViewPositionsAfterBuild();
 
         // If file was changed during build, recompile with latest content
@@ -688,6 +746,8 @@ export function EditorLayout({
           saveViewPositionsBeforeBuild();
           fetch(withShareToken(`/api/projects/${project.id}/compile`), {
             method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mainFile: data.mainFile }),
           })
             .then(async (res) => {
               if (res.ok) {
@@ -877,9 +937,20 @@ export function EditorLayout({
       }
 
       const resolvedFilePath =
-        filePath ?? files.find((f) => f.id === fileId)?.path ?? null;
+        filePath ?? filesRef.current.find((f) => f.id === fileId)?.path ?? null;
+      const selectedFile = filesRef.current.find((file) => file.id === fileId);
+
+      if (selectedFile?.isDocument && selectedFile.id !== activeDocumentIdRef.current) {
+        resetCompileState();
+        activeDocumentIdRef.current = selectedFile.id;
+        activeDocumentPathRef.current = selectedFile.path;
+        setActiveDocumentId(selectedFile.id);
+        setPdfUrl(null);
+        setBuildStatus("idle");
+      }
 
       setRemoteCursors(new Map());
+      activeFileIdRef.current = fileId;
       setActiveFileId(fileId);
       const cached = fileContentsRef.current.get(fileId);
       setActiveFileContent(cached ?? "");
@@ -891,7 +962,7 @@ export function EditorLayout({
 
       sendActiveFile(fileId, resolvedFilePath);
     },
-    [activeFileContent, activeFileId, files, openFiles, sendActiveFile]
+    [activeFileContent, activeFileId, openFiles, resetCompileState, sendActiveFile]
   );
 
   const handleCloseTab = useCallback(
@@ -925,21 +996,9 @@ export function EditorLayout({
       if (savedContentRef.current.get(activeFileId) === content) return;
 
       // Decide whether to actually trigger a compile
-      const willCompile = shouldCompile && !compilingRef.current;
-
-      try {
-        await fetch(withShareToken(`/api/projects/${project.id}/files/${activeFileId}`), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, autoCompile: willCompile }),
-        });
-
-        savedContentRef.current.set(activeFileId, content);
-        setDirtyFileIds((prev) => {
-          const next = new Set(prev);
-          next.delete(activeFileId);
-          return next;
-        });
+      const willCompile = Boolean(
+        shouldCompile && activeDocumentPathRef.current && !compilingRef.current
+      );
 
       if (willCompile) {
         saveViewPositionsBeforeBuild();
@@ -950,13 +1009,51 @@ export function EditorLayout({
         setCompiling(true);
         setBuildStatus("queued");
         setPdfLoading(true);
+      }
+
+      try {
+        const response = await fetch(
+          withShareToken(`/api/projects/${project.id}/files/${activeFileId}`),
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content,
+              autoCompile: willCompile,
+              mainFile: activeDocumentPathRef.current ?? undefined,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          if (willCompile) resetCompileState();
+          return;
+        }
+
+        const result = await response.json().catch(() => ({}));
+        if (willCompile && typeof result.buildId === "string") {
+          currentBuildIdRef.current = result.buildId;
+        }
+
+        savedContentRef.current.set(activeFileId, content);
+        setDirtyFileIds((prev) => {
+          const next = new Set(prev);
+          next.delete(activeFileId);
+          return next;
+        });
+
+        if (willCompile) {
           startBuildPolling();
-        } else if (shouldCompile && compilingRef.current) {
+        } else if (
+          shouldCompile &&
+          activeDocumentPathRef.current &&
+          compilingRef.current
+        ) {
           // Wanted to compile but already compiling — recompile after current build
           pendingRecompileRef.current = true;
         }
       } catch {
-        // Save failed silently
+        if (willCompile) resetCompileState();
       }
     },
     [
@@ -964,6 +1061,7 @@ export function EditorLayout({
       beginCompileTracking,
       canEdit,
       project.id,
+      resetCompileState,
       saveViewPositionsBeforeBuild,
       startBuildPolling,
       withShareToken,
@@ -1006,11 +1104,9 @@ export function EditorLayout({
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       if (!activeFileId || !hasUnsavedChanges) return;
 
-      const delay = autoCompileEnabled ? 2000 : 1000;
-
       saveTimeoutRef.current = setTimeout(() => {
         handleSave(content, autoCompileEnabled);
-      }, delay);
+      }, 1000);
     },
     [handleSave, activeFileId, autoCompileEnabled, canEdit]
   );
@@ -1028,6 +1124,8 @@ export function EditorLayout({
   const handleCompile = useCallback(async () => {
     if (!canEdit) return;
     if (compilingRef.current) return;
+    const mainFile = activeDocumentPathRef.current;
+    if (!mainFile) return;
 
     setAiFixExplanation(null);
     saveViewPositionsBeforeBuild();
@@ -1042,6 +1140,8 @@ export function EditorLayout({
     try {
       const res = await fetch(withShareToken(`/api/projects/${project.id}/compile`), {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mainFile }),
       });
 
       if (!res.ok) {
@@ -1074,6 +1174,7 @@ export function EditorLayout({
     if (!canEdit) return;
     if (fixingWithAi) return;
     if (compilingRef.current) return;
+    if (!mainFilePath) return;
 
     const activeFilePath =
       activeFileId
@@ -1103,6 +1204,7 @@ export function EditorLayout({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: project.id,
+          mainFile: mainFilePath,
           activeFilePath,
           activeFileContent,
           errorLimit: 8,
@@ -1188,11 +1290,16 @@ export function EditorLayout({
   const handleCancelBuild = useCallback(async () => {
     if (!canEdit) return;
     if (!(buildStatus === "compiling" || buildStatus === "queued")) return;
+    const buildId = currentBuildIdRef.current;
+    if (!buildId || buildId === "pending") return;
 
     try {
-      const res = await fetch(withShareToken(`/api/projects/${project.id}/cancel`), {
-        method: "POST",
-      });
+      const res = await fetch(
+        withShareToken(
+          `/api/projects/${project.id}/cancel?buildId=${encodeURIComponent(buildId)}`
+        ),
+        { method: "POST" }
+      );
 
       if (!res.ok) {
         setBuildStatus("error");
@@ -1264,9 +1371,11 @@ export function EditorLayout({
       });
       if (res.ok) {
         const data = await res.json();
-        setFiles(data.files);
+        const freshFiles = data.files as ProjectFile[];
+        filesRef.current = freshFiles;
+        setFiles(freshFiles);
         const freshPaths = new Map<string, string>(
-          data.files.map((file: ProjectFile) => [file.id, file.path] as const)
+          freshFiles.map((file) => [file.id, file.path] as const)
         );
         setOpenFiles((prev) =>
           prev.flatMap((file) => {
@@ -1282,16 +1391,27 @@ export function EditorLayout({
         if (activeId && !freshPaths.has(activeId)) {
           handleCloseTab(activeId);
         }
-        if (typeof data.mainFile === "string" && data.mainFile !== mainFilePath) {
-          setMainFilePath(data.mainFile);
-          setPdfUrl(null);
-          setBuildStatus((prev) => (prev === "success" ? "idle" : prev));
+
+        const activeDocumentId = activeDocumentIdRef.current;
+        if (
+          !activeDocumentId ||
+          !freshFiles.some(
+            (file) => file.id === activeDocumentId && file.isDocument
+          )
+        ) {
+          const nextDocument =
+            freshFiles.find(
+              (file) => file.isDocument && file.path === data.mainFile
+            ) ?? freshFiles.find((file) => file.isDocument);
+          activeDocumentIdRef.current = nextDocument?.id ?? null;
+          activeDocumentPathRef.current = nextDocument?.path ?? null;
+          setActiveDocumentId(nextDocument?.id ?? null);
         }
       }
     } catch {
       // Silently fail
     }
-  }, [handleCloseTab, mainFilePath, project.id, withShareToken]);
+  }, [handleCloseTab, project.id, withShareToken]);
 
   const isImageFile = useCallback(
     (fileId: string | null): boolean => {
@@ -1411,19 +1531,23 @@ export function EditorLayout({
     }
     if (files.length === 0) return;
 
-    const mainFile = files.find((f) => f.path === mainFilePath);
+    const mainFile =
+      files.find((file) => file.id === activeDocumentId) ??
+      files.find((file) => file.isDocument && file.path === project.mainFile);
     if (mainFile) {
       autoOpenedMainRef.current = true;
       handleFileSelect(mainFile.id, mainFile.path);
       return;
     }
 
-    const fallbackTex = files.find((f) => !f.isDirectory && f.path.endsWith(".tex"));
+    const fallbackTex =
+      files.find((file) => file.isDocument) ??
+      files.find((file) => !file.isDirectory && file.path.endsWith(".tex"));
     if (fallbackTex) {
       autoOpenedMainRef.current = true;
       handleFileSelect(fallbackTex.id, fallbackTex.path);
     }
-  }, [activeFileId, files, handleFileSelect, mainFilePath, openFiles.length]);
+  }, [activeDocumentId, activeFileId, files, handleFileSelect, openFiles.length, project.mainFile]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1447,6 +1571,7 @@ export function EditorLayout({
       <EditorHeader
         projectName={project.name}
         projectId={project.id}
+        documentPath={mainFilePath}
         compiling={compiling}
         onCompile={handleCompile}
         autoCompileEnabled={autoCompileEnabled}
@@ -1485,12 +1610,16 @@ export function EditorLayout({
                   projectId={project.id}
                   files={files}
                   activeFileId={activeFileId}
-                  mainFilePath={mainFilePath}
+                  mainFilePath={mainFilePath ?? ""}
                   onFileSelect={handleFileSelect}
                   onMainFileChange={(nextMainFilePath) => {
-                    setMainFilePath(nextMainFilePath);
-                    setPdfUrl(null);
-                    setBuildStatus((prev) => (prev === "success" ? "idle" : prev));
+                    const document = filesRef.current.find(
+                      (file) => file.isDocument && file.path === nextMainFilePath
+                    );
+                    if (!document) return;
+                    activeDocumentIdRef.current = document.id;
+                    activeDocumentPathRef.current = document.path;
+                    setActiveDocumentId(document.id);
                   }}
                   onFilesChanged={refreshFiles}
                   shareToken={shareToken}

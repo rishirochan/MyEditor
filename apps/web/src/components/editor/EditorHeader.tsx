@@ -45,6 +45,7 @@ interface ProjectListItem {
 interface EditorHeaderProps {
   projectName: string;
   projectId: string;
+  documentPath: string | null;
   compiling: boolean;
   onCompile: () => void;
   autoCompileEnabled: boolean;
@@ -122,6 +123,7 @@ function BuildStatusDot({ status }: { status: string | null }) {
 export function EditorHeader({
   projectName,
   projectId,
+  documentPath,
   compiling,
   onCompile,
   autoCompileEnabled,
@@ -166,7 +168,15 @@ export function EditorHeader({
   }
 
   function handleDownloadPdf() {
-    window.open(withShareToken(`/api/projects/${projectId}/pdf?download=true`), "_blank");
+    if (!documentPath) return;
+    window.open(
+      withShareToken(
+        `/api/projects/${projectId}/pdf?mainFile=${encodeURIComponent(
+          documentPath
+        )}&download=true`
+      ),
+      "_blank"
+    );
   }
 
   function handleDownloadZip() {
@@ -275,10 +285,10 @@ export function EditorHeader({
               <button
                 type="button"
                 onClick={onCompile}
-                disabled={compiling}
+                disabled={compiling || !documentPath}
                 className={cn(
                   "flex items-center gap-1.5 rounded-lg px-3 py-1 text-sm font-medium transition-colors",
-                  compiling
+                  compiling || !documentPath
                     ? "bg-accent/50 text-bg-primary cursor-not-allowed"
                     : "bg-accent text-bg-primary hover:bg-accent-hover"
                 )}
@@ -294,7 +304,11 @@ export function EditorHeader({
               </button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Compile project (Ctrl+Enter)</p>
+              <p>
+                {documentPath
+                  ? `Compile ${documentPath} (Ctrl+Enter)`
+                  : "Select or create a document first"}
+              </p>
             </TooltipContent>
           </Tooltip>
 
@@ -405,7 +419,8 @@ export function EditorHeader({
             <button
               type="button"
               onClick={handleDownloadPdf}
-              className="flex items-center gap-1.5 rounded-md border border-border bg-bg-tertiary px-2.5 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary hover:bg-bg-elevated"
+              disabled={!documentPath}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-bg-tertiary px-2.5 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Download className="h-3.5 w-3.5" />
               <span className="hidden md:inline">PDF</span>

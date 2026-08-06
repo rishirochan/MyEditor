@@ -145,7 +145,29 @@ export async function PUT(
       );
     }
 
-    const { content, autoCompile } = parsed.data;
+    const { content, autoCompile, mainFile } = parsed.data;
+    const compileMainFile = mainFile ?? project.mainFile;
+
+    if (autoCompile) {
+      const [document] = await db
+        .select({ id: projectFiles.id })
+        .from(projectFiles)
+        .where(
+          and(
+            eq(projectFiles.projectId, projectId),
+            eq(projectFiles.path, compileMainFile),
+            eq(projectFiles.isDocument, true)
+          )
+        )
+        .limit(1);
+
+      if (!document) {
+        return NextResponse.json(
+          { error: "Document root not found" },
+          { status: 400 }
+        );
+      }
+    }
 
     // Write updated content to disk
     const projectDir = storage.getProjectDir(project.userId, projectId);
@@ -170,6 +192,7 @@ export async function PUT(
       .where(eq(projects.id, projectId));
 
     let buildQueued = false;
+    let buildId: string | null = null;
 
     const storageUserId = project.userId;
     const actorUserId = access.user?.id ?? null;
@@ -177,7 +200,7 @@ export async function PUT(
 
     // If autoCompile is true, create a build record and enqueue compile job
     if (autoCompile) {
-      const buildId = uuidv4();
+      buildId = uuidv4();
 
       await db.insert(builds).values({
         id: buildId,
@@ -185,6 +208,7 @@ export async function PUT(
         userId: buildUserId,
         status: "queued",
         engine: project.engine,
+        mainFile: compileMainFile,
       });
 
       await enqueueCompileJob({
@@ -194,12 +218,13 @@ export async function PUT(
         storageUserId,
         triggeredByUserId: actorUserId,
         engine: project.engine,
-        mainFile: project.mainFile,
+        mainFile: compileMainFile,
       });
 
       broadcastBuildUpdate(buildUserId, {
         projectId,
         buildId,
+        mainFile: compileMainFile,
         status: "queued",
         triggeredByUserId: actorUserId,
       });
@@ -219,6 +244,7 @@ export async function PUT(
     return NextResponse.json({
       file: updatedFile,
       buildQueued,
+      buildId,
     });
   } catch (error) {
     console.error("Error updating file:", error);
@@ -345,7 +371,37 @@ export async function PATCH(
           .update(projectFiles)
           .set({ path: childNewPath, updatedAt: new Date() })
           .where(eq(projectFiles.id, child.id));
+
+        if (child.isDocument) {
+          await db
+            .update(builds)
+            .set({
+              mainFile: childNewPath,
+              pdfPath: storage.getPdfPath(project.userId, projectId, childNewPath),
+            })
+            .where(
+              and(
+                eq(builds.projectId, projectId),
+                eq(builds.mainFile, child.path)
+              )
+            );
+        }
       }
+    } else if (file.isDocument) {
+      const oldPdfPath = storage.getPdfPath(project.userId, projectId, file.path);
+      const newPdfPath = storage.getPdfPath(project.userId, projectId, newPath);
+      if (await storage.fileExists(oldPdfPath)) {
+        await storage.renameFile(oldPdfPath, newPdfPath);
+      }
+      await db
+        .update(builds)
+        .set({ mainFile: newPath, pdfPath: newPdfPath })
+        .where(
+          and(
+            eq(builds.projectId, projectId),
+            eq(builds.mainFile, file.path)
+          )
+        );
     }
 
     let nextMainFile = project.mainFile;

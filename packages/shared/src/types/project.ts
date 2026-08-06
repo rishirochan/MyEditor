@@ -28,6 +28,7 @@ export interface ProjectFile {
   mimeType: string;
   sizeBytes: number;
   isDirectory: boolean;
+  isDocument: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +39,7 @@ export interface Build {
   userId: string;
   status: BuildStatus;
   engine: Engine;
+  mainFile: string;
   logs: string;
   durationMs: number | null;
   pdfPath: string | null;

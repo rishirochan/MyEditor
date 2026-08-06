@@ -7,6 +7,7 @@ export interface BuildStatusEvent {
   type: "build:status";
   projectId: string;
   buildId: string;
+  mainFile: string;
   status: "queued" | "compiling";
   triggeredByUserId?: string | null;
 }
@@ -15,6 +16,7 @@ export interface BuildCompleteEvent {
   type: "build:complete";
   projectId: string;
   buildId: string;
+  mainFile: string;
   status: BuildStatus;
   pdfUrl: string | null;
   logs: string;

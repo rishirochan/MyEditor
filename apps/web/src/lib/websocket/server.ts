@@ -42,6 +42,7 @@ function getPublisher(): IORedis {
 export interface BuildStatusPayload {
   projectId: string;
   buildId: string;
+  mainFile: string;
   status: "queued" | "compiling";
   triggeredByUserId?: string | null;
 }
@@ -52,6 +53,7 @@ export interface BuildStatusPayload {
 export interface BuildCompletePayload {
   projectId: string;
   buildId: string;
+  mainFile: string;
   status: "success" | "error" | "timeout" | "canceled";
   pdfUrl: string | null;
   logs: string;

@@ -1,5 +1,8 @@
+import { db } from "@/lib/db";
+import { projectFiles } from "@/lib/db/schema";
 import { resolveProjectAccess } from "@/lib/auth/project-access";
 import * as storage from "@/lib/storage";
+import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
 function buildDownloadPdfName(projectName: string): string {
@@ -28,9 +31,26 @@ export async function GET(
     }
 
     const project = access.project;
+    const mainFile = request.nextUrl.searchParams.get("mainFile") ?? project.mainFile;
+
+    const [document] = await db
+      .select({ id: projectFiles.id })
+      .from(projectFiles)
+      .where(
+        and(
+          eq(projectFiles.projectId, projectId),
+          eq(projectFiles.path, mainFile),
+          eq(projectFiles.isDocument, true)
+        )
+      )
+      .limit(1);
+
+    if (!document) {
+      return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    }
 
     // Resolve the PDF path on disk (use project owner's directory)
-    const pdfPath = storage.getPdfPath(project.userId, projectId, project.mainFile);
+    const pdfPath = storage.getPdfPath(project.userId, projectId, mainFile);
     const exists = await storage.fileExists(pdfPath);
 
     if (!exists) {
@@ -41,7 +61,7 @@ export async function GET(
     }
 
     const pdfBuffer = await storage.readFileBinary(pdfPath);
-    const pdfName = project.mainFile.replace(/\.tex$/, ".pdf");
+    const pdfName = mainFile.replace(/\.tex$/, ".pdf");
     const downloadPdfName = buildDownloadPdfName(project.name);
 
     // Support ?download=true for Content-Disposition: attachment
