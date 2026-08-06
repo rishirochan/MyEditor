@@ -14,6 +14,7 @@ import { EditorTabs } from "@/components/editor/EditorTabs";
 import { PdfViewer, PdfViewerHandle } from "@/components/editor/PdfViewer";
 import { BuildLogs } from "@/components/editor/BuildLogs";
 import { ChatPanel } from "@/components/editor/ChatPanel";
+import { LinkedInPanel } from "@/components/editor/LinkedInPanel";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { FileText } from "lucide-react";
 import type { PresenceUser, ChatMessage, CursorSelection, DocChange } from "@myeditor/shared";
@@ -175,6 +176,7 @@ export function EditorLayout({
   const [aiFixExplanation, setAiFixExplanation] = useState<string | null>(null);
   const [fixingWithAi, setFixingWithAi] = useState(false);
   const [buildLogsExpanded, setBuildLogsExpanded] = useState(true);
+  const [linkedInOpen, setLinkedInOpen] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
 
   // Disable auto-compile if last build failed (prevents rebuild loop on refresh)
@@ -227,6 +229,10 @@ export function EditorLayout({
   const [followingUserId, setFollowingUserId] = useState<string | null>(null);
   const followingUserIdRef = useRef<string | null>(null);
   followingUserIdRef.current = followingUserId;
+
+  const activeFilePath = activeFileId
+    ? files.find((file) => file.id === activeFileId)?.path ?? null
+    : null;
 
   // User color map for chat
   const userColorMap = new Map<string, string>();
@@ -1588,6 +1594,8 @@ export function EditorLayout({
         shareToken={shareToken}
         canManageShare={!isPublicShare && role === "owner"}
         canEdit={canEdit}
+        onToggleLinkedIn={() => setLinkedInOpen((open) => !open)}
+        linkedInOpen={linkedInOpen}
       />
 
       {/* Main content area */}
@@ -1736,6 +1744,20 @@ export function EditorLayout({
             />
           </Panel>
         </PanelGroup>
+
+        {/* LinkedIn panel — overlay rather than a resizable Panel so the
+            saved PanelGroup layout is untouched when it toggles. */}
+        {linkedInOpen && (
+          <div className="absolute inset-y-0 right-0 z-20 w-[360px] max-w-full shadow-lg">
+            <LinkedInPanel
+              open={linkedInOpen}
+              onClose={() => setLinkedInOpen(false)}
+              projectId={project.id}
+              resumePath={activeFilePath}
+              resumeContent={activeFileContent}
+            />
+          </div>
+        )}
 
         {/* Chat Panel */}
         {isSharedProject && (

@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Check,
   Ban,
+  Linkedin,
 } from "lucide-react";
 import {
   Tooltip,
@@ -62,6 +63,8 @@ interface EditorHeaderProps {
   shareToken?: string | null;
   canManageShare?: boolean;
   canEdit?: boolean;
+  onToggleLinkedIn?: () => void;
+  linkedInOpen?: boolean;
 }
 
 // ─── Build Status Badge ────────────────────────────
@@ -140,6 +143,8 @@ export function EditorHeader({
   shareToken = null,
   canManageShare = role === "owner",
   canEdit = true,
+  onToggleLinkedIn,
+  linkedInOpen = false,
 }: EditorHeaderProps) {
   const [shareOpen, setShareOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
@@ -405,6 +410,33 @@ export function EditorHeader({
             </TooltipTrigger>
             <TooltipContent>
               <p>Share project</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+
+      {/* LinkedIn button */}
+      {onToggleLinkedIn && (
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggleLinkedIn}
+                aria-pressed={linkedInOpen}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors",
+                  linkedInOpen
+                    ? "border-accent/30 bg-accent/5 text-accent"
+                    : "border-border bg-bg-tertiary text-text-secondary hover:text-accent hover:border-accent/30 hover:bg-accent/5"
+                )}
+              >
+                <Linkedin className="h-3.5 w-3.5" />
+                <span className="hidden md:inline">LinkedIn</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Draft LinkedIn text from this resume</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
