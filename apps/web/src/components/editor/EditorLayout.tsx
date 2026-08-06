@@ -1274,6 +1274,14 @@ export function EditorLayout({
             return path === undefined ? [] : [{ ...file, path }];
           })
         );
+        // The active file can vanish here (deleted in another session, or
+        // locally while the websocket is down and no file:deleted arrives).
+        // Dropping its tab above would otherwise leave the editor mounted on
+        // a dead id, so hand off to the same close path a tab click uses.
+        const activeId = activeFileIdRef.current;
+        if (activeId && !freshPaths.has(activeId)) {
+          handleCloseTab(activeId);
+        }
         if (typeof data.mainFile === "string" && data.mainFile !== mainFilePath) {
           setMainFilePath(data.mainFile);
           setPdfUrl(null);
@@ -1283,7 +1291,7 @@ export function EditorLayout({
     } catch {
       // Silently fail
     }
-  }, [mainFilePath, project.id, withShareToken]);
+  }, [handleCloseTab, mainFilePath, project.id, withShareToken]);
 
   const isImageFile = useCallback(
     (fileId: string | null): boolean => {
