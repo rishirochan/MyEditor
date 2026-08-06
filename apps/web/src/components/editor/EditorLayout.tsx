@@ -14,6 +14,7 @@ import { EditorTabs } from "@/components/editor/EditorTabs";
 import { PdfViewer, PdfViewerHandle } from "@/components/editor/PdfViewer";
 import { BuildLogs } from "@/components/editor/BuildLogs";
 import { ChatPanel } from "@/components/editor/ChatPanel";
+import { AiChatPanel } from "@/components/editor/AiChatPanel";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { FileText } from "lucide-react";
 import type { PresenceUser, ChatMessage, CursorSelection, DocChange } from "@myeditor/shared";
@@ -186,6 +187,16 @@ export function EditorLayout({
   });
 
   const [dirtyFileIds, setDirtyFileIds] = useState<Set<string>>(new Set());
+
+  // ─── AI Chat Panel State ──────────────────────────
+
+  const canUseAi = canEdit && !shareToken;
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiPendingSelection, setAiPendingSelection] = useState<{
+    fromLine: number;
+    toLine: number;
+    text: string;
+  } | null>(null);
 
   // ─── Compile Guards (prevent build pileup) ────────
 
@@ -1170,6 +1181,71 @@ export function EditorLayout({
     withShareToken,
   ]);
 
+  // ─── AI Chat Panel ────────────────────────────────
+
+  const handleAskAi = useCallback(
+    (selection: { fromLine: number; toLine: number; text: string }) => {
+      setAiPendingSelection(selection);
+      setAiPanelOpen(true);
+    },
+    []
+  );
+
+  /**
+   * Editor buffer for the active file, or undefined while it is still loading
+   * so the server falls back to disk instead of rewriting the file from "".
+   */
+  const getAiFileContent = useCallback(() => {
+    const activeId = activeFileIdRef.current;
+    if (!activeId) return undefined;
+    return fileContentsRef.current.get(activeId);
+  }, []);
+
+  const handleAiEditsApplied = useCallback(
+    (touchedPaths: string[]) => {
+      // A queued debounce save would PUT the pre-edit buffer back over the
+      // content the AI just wrote through the file API.
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
+      touchedPaths.forEach((filePath) => {
+        const touched = filesRef.current.find((file) => file.path === filePath);
+        if (!touched) return;
+        fileContentsRef.current.delete(touched.id);
+        savedContentRef.current.delete(touched.id);
+        setDirtyFileIds((prev) => {
+          if (!prev.has(touched.id)) return prev;
+          const next = new Set(prev);
+          next.delete(touched.id);
+          return next;
+        });
+      });
+
+      const activeId = activeFileIdRef.current;
+      if (activeId) {
+        const activePath = filesRef.current.find((f) => f.id === activeId)?.path;
+        if (activePath && touchedPaths.includes(activePath)) {
+          fetchFileContent(activeId);
+        }
+      }
+
+      if (!autoCompileEnabledRef.current) return;
+      if (compilingRef.current) {
+        pendingRecompileRef.current = true;
+        return;
+      }
+      handleCompile();
+    },
+    [fetchFileContent, handleCompile]
+  );
+
+  // A selection chip only makes sense for the file it was made in
+  useEffect(() => {
+    setAiPendingSelection(null);
+  }, [activeFileId]);
+
   const handleFixWithAi = useCallback(async () => {
     if (!canEdit) return;
     if (fixingWithAi) return;
@@ -1192,6 +1268,13 @@ export function EditorLayout({
     compilingRef.current = true;
     pendingRecompileRef.current = false;
     saveViewPositionsBeforeBuild();
+
+    // Same reason as handleAiEditsApplied: a queued debounce save would undo
+    // the AI's edits once savedContentRef is invalidated below.
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
 
     try {
       // Persist current editor buffer before requesting AI fixes.
@@ -1588,6 +1671,10 @@ export function EditorLayout({
         shareToken={shareToken}
         canManageShare={!isPublicShare && role === "owner"}
         canEdit={canEdit}
+        aiPanelOpen={aiPanelOpen}
+        onToggleAiPanel={
+          canUseAi ? () => setAiPanelOpen((open) => !open) : undefined
+        }
       />
 
       {/* Main content area */}
@@ -1629,74 +1716,112 @@ export function EditorLayout({
 
               <PanelResizeHandle className="w-2 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/30 data-[resize-handle-active]:bg-accent/30 relative after:absolute after:inset-y-0 after:left-1/2 after:-translate-x-1/2 after:w-px after:bg-border" />
 
-              {/* Code editor */}
+              {/* Code editor (+ optional AI chat split) */}
               <Panel defaultSize={45} minSize={20}>
-                <div className="flex h-full flex-col bg-bg-primary">
-                  <EditorTabs
-                    openFiles={openFiles}
-                    activeFileId={activeFileId}
-                    dirtyFileIds={dirtyFileIds}
-                    onSelectTab={(fileId) => {
-                      const filePath =
-                        openFiles.find((f) => f.id === fileId)?.path ??
-                        files.find((f) => f.id === fileId)?.path ??
-                        null;
-                      handleFileSelect(fileId, filePath);
-                    }}
-                    onCloseTab={handleCloseTab}
-                  />
-                  <div className="flex-1 min-h-0">
-                    {activeFileId ? (
-                      isImageFile(activeFileId) ? (
-                        <div className="flex h-full items-center justify-center bg-bg-primary p-4 overflow-auto">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={withShareToken(
-                              `/api/projects/${project.id}/files/${activeFileId}?raw`
-                            )}
-                            alt={openFiles.find((f) => f.id === activeFileId)?.path ?? "Image"}
-                            className="max-w-full max-h-full object-contain"
-                          />
-                        </div>
-                      ) : (
-                        <CodeEditor
-                          ref={codeEditorRef}
-                          content={activeFileContent}
-                          onChange={handleEditorChange}
-                          language="latex"
-                          readOnly={!canEdit}
-                          errors={activeFileErrors}
-                          onDocChange={(changes) => {
-                            if (activeFileId) sendDocChange(activeFileId, changes, Date.now());
-                          }}
-                          onCursorChange={(selection) => {
-                            if (activeFileId) sendCursorMove(activeFileId, selection);
-                          }}
-                          remoteChanges={remoteChanges}
-                          remoteCursors={remoteCursors}
-                          hideLocalCursor={Boolean(followingUserId)}
-                          onEditorPointerDown={handleEditorPointerDown}
-                        />
-                      )
-                    ) : (
-                      <div className="flex h-full items-center justify-center animate-fade-in">
-                        <div className="flex flex-col items-center gap-3 text-center px-4">
-                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-elevated">
-                            <FileText className="h-6 w-6 text-text-muted" />
+                <PanelGroup direction="horizontal" className="h-full w-full">
+                  <Panel defaultSize={50} minSize={25} order={1}>
+                    <div className="flex h-full flex-col bg-bg-primary">
+                      <EditorTabs
+                        openFiles={openFiles}
+                        activeFileId={activeFileId}
+                        dirtyFileIds={dirtyFileIds}
+                        onSelectTab={(fileId) => {
+                          const filePath =
+                            openFiles.find((f) => f.id === fileId)?.path ??
+                            files.find((f) => f.id === fileId)?.path ??
+                            null;
+                          handleFileSelect(fileId, filePath);
+                        }}
+                        onCloseTab={handleCloseTab}
+                      />
+                      <div className="flex-1 min-h-0">
+                        {activeFileId ? (
+                          isImageFile(activeFileId) ? (
+                            <div className="flex h-full items-center justify-center bg-bg-primary p-4 overflow-auto">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={withShareToken(
+                                  `/api/projects/${project.id}/files/${activeFileId}?raw`
+                                )}
+                                alt={openFiles.find((f) => f.id === activeFileId)?.path ?? "Image"}
+                                className="max-w-full max-h-full object-contain"
+                              />
+                            </div>
+                          ) : (
+                            <CodeEditor
+                              ref={codeEditorRef}
+                              content={activeFileContent}
+                              onChange={handleEditorChange}
+                              language="latex"
+                              readOnly={!canEdit}
+                              errors={activeFileErrors}
+                              onDocChange={(changes) => {
+                                if (activeFileId) sendDocChange(activeFileId, changes, Date.now());
+                              }}
+                              onCursorChange={(selection) => {
+                                if (activeFileId) sendCursorMove(activeFileId, selection);
+                              }}
+                              remoteChanges={remoteChanges}
+                              remoteCursors={remoteCursors}
+                              hideLocalCursor={Boolean(followingUserId)}
+                              onEditorPointerDown={handleEditorPointerDown}
+                              onAskAi={canUseAi ? handleAskAi : undefined}
+                            />
+                          )
+                        ) : (
+                          <div className="flex h-full items-center justify-center animate-fade-in">
+                            <div className="flex flex-col items-center gap-3 text-center px-4">
+                              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-elevated">
+                                <FileText className="h-6 w-6 text-text-muted" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-text-secondary">
+                                  No file open
+                                </p>
+                                <p className="mt-1 text-xs text-text-muted">
+                                  Select a file from the sidebar to start editing
+                                </p>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-sm font-medium text-text-secondary">
-                              No file open
-                            </p>
-                            <p className="mt-1 text-xs text-text-muted">
-                              Select a file from the sidebar to start editing
-                            </p>
-                          </div>
-                        </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
+                    </div>
+                  </Panel>
+
+                  {/* AI chat panel — takes half of the editor view */}
+                  {canUseAi && aiPanelOpen && (
+                    <>
+                      <PanelResizeHandle className="w-2 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/30 data-[resize-handle-active]:bg-accent/30 relative after:absolute after:inset-y-0 after:left-1/2 after:-translate-x-1/2 after:w-px after:bg-border" />
+                      <Panel defaultSize={50} minSize={25} order={2}>
+                        <AiChatPanel
+                          projectId={project.id}
+                          activeFile={
+                            activeFileId && !isImageFile(activeFileId)
+                              ? {
+                                  id: activeFileId,
+                                  path:
+                                    openFiles.find((f) => f.id === activeFileId)
+                                      ?.path ??
+                                    files.find((f) => f.id === activeFileId)
+                                      ?.path ??
+                                    "",
+                                }
+                              : null
+                          }
+                          getFileContent={getAiFileContent}
+                          pendingSelection={aiPendingSelection}
+                          onClearSelection={() => setAiPendingSelection(null)}
+                          onEditsApplied={handleAiEditsApplied}
+                          onClose={() => {
+                            setAiPanelOpen(false);
+                            setAiPendingSelection(null);
+                          }}
+                        />
+                      </Panel>
+                    </>
+                  )}
+                </PanelGroup>
               </Panel>
 
               <PanelResizeHandle className="w-2 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/30 data-[resize-handle-active]:bg-accent/30 relative after:absolute after:inset-y-0 after:left-1/2 after:-translate-x-1/2 after:w-px after:bg-border" />

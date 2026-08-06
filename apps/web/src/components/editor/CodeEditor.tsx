@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
+import { useRef, useEffect, useImperativeHandle, forwardRef, useState } from "react";
+import { Sparkles } from "lucide-react";
 import type { DocChange, CursorSelection } from "@myeditor/shared";
 
 // ─── Types ──────────────────────────────────────────
@@ -31,6 +32,8 @@ interface CodeEditorProps {
   errors?: BuildError[];
   hideLocalCursor?: boolean;
   onEditorPointerDown?: () => void;
+  /** Shows a floating "Ask AI" button near non-empty selections */
+  onAskAi?: (selection: { fromLine: number; toLine: number; text: string }) => void;
   // Collaboration
   onDocChange?: (changes: DocChange[]) => void;
   onCursorChange?: (selection: CursorSelection) => void;
@@ -58,6 +61,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
         errors,
       hideLocalCursor = false,
       onEditorPointerDown,
+      onAskAi,
       onDocChange,
       onCursorChange,
       remoteChanges,
@@ -77,6 +81,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
     const isExternalUpdate = useRef(false);
     const cursorEmitRafRef = useRef<number | null>(null);
     const lastCursorEmitKeyRef = useRef<string>("");
+    const onAskAiRef = useRef(onAskAi);
+    // "Ask AI" floating button position (relative to the editor container)
+    const [askAiPos, setAskAiPos] = useState<{ top: number; left: number } | null>(null);
+    const askAiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Keep callback refs current
     useEffect(() => {
       onChangeRef.current = onChange;
@@ -93,6 +101,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
     useEffect(() => {
       onEditorPointerDownRef.current = onEditorPointerDown;
     }, [onEditorPointerDown]);
+
+    useEffect(() => {
+      onAskAiRef.current = onAskAi;
+    }, [onAskAi]);
 
     // Expose highlightText and scrollToLine to parent
     useImperativeHandle(
@@ -700,6 +712,37 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
                   onCursorChangeRef.current?.(payload);
                 });
               }
+
+              // "Ask AI" popup: appear only after the selection is stable for
+              // ~200ms to avoid flicker while dragging.
+              if (update.selectionSet || update.docChanged) {
+                if (askAiTimerRef.current) clearTimeout(askAiTimerRef.current);
+                const sel = update.state.selection.main;
+                // External updates (file switch, remote edit) carry the previous
+                // selection offsets into unrelated text — never offer them to AI.
+                if (sel.empty || isExternalUpdate.current || !onAskAiRef.current) {
+                  setAskAiPos(null);
+                } else {
+                  askAiTimerRef.current = setTimeout(() => {
+                    askAiTimerRef.current = null;
+                    const v = viewRef.current;
+                    const container = containerRef.current;
+                    if (!v || !container) return;
+                    const current = v.state.selection.main;
+                    if (current.empty) return;
+                    const coords = v.coordsAtPos(current.head);
+                    if (!coords) return;
+                    const rect = container.getBoundingClientRect();
+                    setAskAiPos({
+                      top: Math.max(coords.top - rect.top - 32, 4),
+                      left: Math.min(
+                        Math.max(coords.left - rect.left, 4),
+                        Math.max(rect.width - 90, 4)
+                      ),
+                    });
+                  }, 200);
+                }
+              }
             }),
           ],
         });
@@ -760,6 +803,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
         if (cursorEmitRafRef.current !== null) {
           cancelAnimationFrame(cursorEmitRafRef.current);
           cursorEmitRafRef.current = null;
+        }
+        if (askAiTimerRef.current) {
+          clearTimeout(askAiTimerRef.current);
+          askAiTimerRef.current = null;
         }
         if (view) {
           view.destroy();
@@ -859,11 +906,37 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
       });
     }, [errors]);
 
+    function handleAskAiClick() {
+      const view = viewRef.current;
+      if (!view || !onAskAiRef.current) return;
+      const sel = view.state.selection.main;
+      if (sel.empty) return;
+      const fromLine = view.state.doc.lineAt(sel.from).number;
+      const toLine = view.state.doc.lineAt(sel.to).number;
+      const text = view.state.sliceDoc(sel.from, sel.to);
+      setAskAiPos(null);
+      onAskAiRef.current({ fromLine, toLine, text });
+    }
+
     return (
-      <div
-        ref={containerRef}
-        className="h-full w-full overflow-hidden bg-editor-bg"
-      />
+      <div className="relative h-full w-full">
+        <div
+          ref={containerRef}
+          className="h-full w-full overflow-hidden bg-editor-bg"
+        />
+        {askAiPos && onAskAi && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleAskAiClick}
+            style={{ top: askAiPos.top, left: askAiPos.left }}
+            className="absolute z-20 flex items-center gap-1 rounded-md border border-border bg-bg-elevated px-2 py-1 text-[11px] font-medium text-text-primary shadow-md transition-colors hover:border-accent/40 hover:text-accent"
+          >
+            <Sparkles className="h-3 w-3 text-accent" />
+            Ask AI
+          </button>
+        )}
+      </div>
     );
   }
 );
