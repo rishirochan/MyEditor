@@ -234,6 +234,12 @@ export function EditorLayout({
     ? files.find((file) => file.id === activeFileId)?.path ?? null
     : null;
 
+  // Public-share visitors have no session, so the endpoint would 401 — hide
+  // the entry point rather than offer a control that cannot work.
+  const toggleLinkedIn = isPublicShare
+    ? undefined
+    : () => setLinkedInOpen((open) => !open);
+
   // User color map for chat
   const userColorMap = new Map<string, string>();
   presenceUsers.forEach((u) => userColorMap.set(u.userId, u.color));
@@ -1594,7 +1600,7 @@ export function EditorLayout({
         shareToken={shareToken}
         canManageShare={!isPublicShare && role === "owner"}
         canEdit={canEdit}
-        onToggleLinkedIn={() => setLinkedInOpen((open) => !open)}
+        onToggleLinkedIn={toggleLinkedIn}
         linkedInOpen={linkedInOpen}
       />
 
@@ -1750,7 +1756,6 @@ export function EditorLayout({
         {linkedInOpen && (
           <div className="absolute inset-y-0 right-0 z-20 w-[360px] max-w-full shadow-lg">
             <LinkedInPanel
-              open={linkedInOpen}
               onClose={() => setLinkedInOpen(false)}
               projectId={project.id}
               resumePath={activeFilePath}

@@ -17,7 +17,6 @@ import {
 } from "@/lib/ai/linkedin";
 
 interface LinkedInPanelProps {
-  open: boolean;
   onClose: () => void;
   projectId: string;
   /** Resume .tex used as context — the currently open file. */
@@ -29,15 +28,6 @@ interface Message {
   role: "user" | "assistant";
   content: string;
 }
-
-const SECTION_LABELS: Record<string, string> = {
-  headline: "Headline",
-  about: "About",
-  experience: "Experience",
-  education: "Education",
-  skills: "Skills",
-  projects: "Projects",
-};
 
 // ─── Update card ────────────────────────────────────
 
@@ -51,6 +41,10 @@ function UpdateCard({
   const [copied, setCopied] = useState(false);
   const limit = LINKEDIN_LIMITS[update.section];
   const overLimit = update.proposed.length > limit;
+
+  // Skipping a card shifts the list, so React can reuse this instance for a
+  // different update. Clear the confirmation rather than show a stale "Copied".
+  useEffect(() => setCopied(false), [update.proposed]);
 
   const copy = useCallback(async () => {
     try {
@@ -68,7 +62,7 @@ function UpdateCard({
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">
-            {SECTION_LABELS[update.section] ?? update.section}
+            {update.section}
           </span>
           <p className="mt-1 truncate text-xs text-text-secondary">
             {update.label}
@@ -129,7 +123,6 @@ function UpdateCard({
 // ─── LinkedInPanel ──────────────────────────────────
 
 export function LinkedInPanel({
-  open,
   onClose,
   projectId,
   resumePath,
@@ -142,6 +135,21 @@ export function LinkedInPanel({
   const [error, setError] = useState<string | null>(null);
   const [hasSnapshot, setHasSnapshot] = useState<boolean | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  // Bumped whenever the context changes or a new request starts, so a reply
+  // for a previous resume can never land in the current conversation.
+  const requestIdRef = useRef(0);
+
+  // The conversation is about one resume. Switching file or project makes the
+  // previous thread and its suggestions meaningless — and dangerous to reuse,
+  // since the next request would send the old thread with the new content.
+  useEffect(() => {
+    requestIdRef.current += 1;
+    setMessages([]);
+    setUpdates([]);
+    setError(null);
+    setHasSnapshot(null);
+    setLoading(false);
+  }, [projectId, resumePath]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -160,6 +168,10 @@ export function LinkedInPanel({
       setLoading(true);
       setError(null);
 
+      requestIdRef.current += 1;
+      const requestId = requestIdRef.current;
+      const isStale = () => requestIdRef.current !== requestId;
+
       try {
         const res = await fetch("/api/ai/linkedin", {
           method: "POST",
@@ -173,6 +185,8 @@ export function LinkedInPanel({
         });
 
         const data = await res.json();
+        if (isStale()) return;
+
         if (!res.ok) {
           throw new Error(data?.error || "Request failed");
         }
@@ -184,9 +198,10 @@ export function LinkedInPanel({
         setUpdates(data.updates ?? []);
         setHasSnapshot(Boolean(data.hasProfileSnapshot));
       } catch (err) {
+        if (isStale()) return;
         setError(err instanceof Error ? err.message : "Request failed");
       } finally {
-        setLoading(false);
+        if (!isStale()) setLoading(false);
       }
     },
     [projectId, resumePath, resumeContent, messages, loading]
@@ -197,8 +212,6 @@ export function LinkedInPanel({
     const trimmed = input.trim();
     if (trimmed) void send(trimmed);
   };
-
-  if (!open) return null;
 
   return (
     <aside className="flex h-full w-full flex-col border-l border-border bg-bg-primary">

@@ -106,13 +106,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // The editor buffer is newer than disk while the user is typing.
+    // The editor buffer is newer than disk while the user is typing, but it is
+    // empty for a file the editor has not loaded yet. Treat blank as "no
+    // buffer" and fall back to disk, otherwise a freshly opened resume is sent
+    // to the model as an empty document.
+    const clientBuffer = parsed.data.resumeContent;
     const resumeContent =
-      typeof parsed.data.resumeContent === "string"
-        ? parsed.data.resumeContent
+      typeof clientBuffer === "string" && clientBuffer.trim().length > 0
+        ? clientBuffer
         : await storage
             .readFile(path.join(projectDir, resumeFile.path))
             .catch(() => "");
+
+    if (!resumeContent.trim()) {
+      return NextResponse.json(
+        { error: "That resume file is empty" },
+        { status: 400 }
+      );
+    }
 
     // ponytail: the current-profile snapshot is just a file in the project, so
     // it needs no table, no migration, and no LinkedIn read access (there is no
@@ -176,7 +187,6 @@ export async function POST(request: NextRequest) {
       reply: aiResult.data.reply,
       updates: aiResult.data.updates,
       hasProfileSnapshot: profileSnapshot.trim().length > 0,
-      snapshotFile: PROFILE_SNAPSHOT_FILE,
     });
   });
 }
