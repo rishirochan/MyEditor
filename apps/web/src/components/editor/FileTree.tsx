@@ -48,7 +48,7 @@ interface FileTreeProps {
   mainFilePath: string;
   onFileSelect: (fileId: string, filePath: string) => void;
   onMainFileChange: (mainFilePath: string) => void;
-  onFilesChanged: () => void;
+  onFilesChanged: () => void | Promise<void>;
   shareToken?: string | null;
   readOnly?: boolean;
 }
@@ -969,7 +969,11 @@ export function FileTree({
         });
 
         if (res.ok) {
-          onFilesChanged();
+          const data = await res.json();
+          await onFilesChanged();
+          if (creating === "file") {
+            onFileSelect(data.file.id, data.file.path);
+          }
         }
       } catch {
         // Silently fail
@@ -978,7 +982,7 @@ export function FileTree({
         setNewName("");
       }
     },
-    [creating, newName, onFilesChanged, projectId, withShareToken]
+    [creating, newName, onFileSelect, onFilesChanged, projectId, withShareToken]
   );
 
   // ─── Delete file ─────────────────────────────────
