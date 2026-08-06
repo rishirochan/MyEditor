@@ -1265,6 +1265,15 @@ export function EditorLayout({
       if (res.ok) {
         const data = await res.json();
         setFiles(data.files);
+        const freshPaths = new Map<string, string>(
+          data.files.map((file: ProjectFile) => [file.id, file.path] as const)
+        );
+        setOpenFiles((prev) =>
+          prev.flatMap((file) => {
+            const path = freshPaths.get(file.id);
+            return path === undefined ? [] : [{ ...file, path }];
+          })
+        );
         if (typeof data.mainFile === "string" && data.mainFile !== mainFilePath) {
           setMainFilePath(data.mainFile);
           setPdfUrl(null);
