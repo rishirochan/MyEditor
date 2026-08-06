@@ -43,6 +43,13 @@
       "when": 1776643200000,
       "tag": "0005_ai_effort",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785986923244,
+      "tag": "0006_slimy_loa",
+      "breakpoints": true
     }
   ]
 }

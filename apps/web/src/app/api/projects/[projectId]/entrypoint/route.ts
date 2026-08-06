@@ -82,6 +82,12 @@ export async function PUT(
       );
     }
 
+
+    await db
+      .update(projectFiles)
+      .set({ isDocument: true, updatedAt: new Date() })
+      .where(eq(projectFiles.id, file.id));
+
     await db
       .update(projects)
       .set({
@@ -90,7 +96,7 @@ export async function PUT(
       })
       .where(eq(projects.id, projectId));
 
-    return NextResponse.json({ mainFile });
+    return NextResponse.json({ mainFile, isDocument: true });
   } catch (error) {
     console.error("Error updating entrypoint:", error);
     return NextResponse.json(

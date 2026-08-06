@@ -51,7 +51,12 @@ export async function GET(
     const [lastBuild] = await db
       .select()
       .from(builds)
-      .where(eq(builds.projectId, project.id))
+      .where(
+        and(
+          eq(builds.projectId, project.id),
+          eq(builds.mainFile, project.mainFile)
+        )
+      )
       .orderBy(desc(builds.createdAt), desc(builds.id))
       .limit(1);
 

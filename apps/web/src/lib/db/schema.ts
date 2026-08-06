@@ -125,6 +125,7 @@ export const projectFiles = pgTable(
     mimeType: varchar("mime_type", { length: 100 }).default("text/plain"),
     sizeBytes: integer("size_bytes").default(0),
     isDirectory: boolean("is_directory").default(false),
+    isDocument: boolean("is_document").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -189,6 +190,7 @@ export const builds = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     status: buildStatusEnum("status").default("queued").notNull(),
     engine: engineEnum("engine").notNull(),
+    mainFile: varchar("main_file", { length: 1000 }).notNull(),
     logs: text("logs").default(""),
     durationMs: integer("duration_ms"),
     pdfPath: varchar("pdf_path", { length: 1000 }),
@@ -198,6 +200,7 @@ export const builds = pgTable(
   },
   (table) => [
     index("builds_project_idx").on(table.projectId),
+    index("builds_project_main_file_idx").on(table.projectId, table.mainFile),
     index("builds_user_idx").on(table.userId),
     index("builds_status_idx").on(table.status),
   ]

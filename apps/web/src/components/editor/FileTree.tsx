@@ -7,6 +7,7 @@ import {
   Folder,
   FolderOpen,
   FilePlus,
+  BookOpen,
   FolderPlus,
   Trash2,
   Pencil,
@@ -16,6 +17,7 @@ import {
   Flag,
   Copy,
   ClipboardPaste,
+  Check,
 } from "lucide-react";
 import FileIcon from "./FileIcon";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -29,6 +31,7 @@ interface ProjectFile {
   mimeType: string | null;
   sizeBytes: number | null;
   isDirectory: boolean | null;
+  isDocument: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -269,7 +272,7 @@ function ContextMenu({
           )}
         >
           <Flag className="h-4 w-4" />
-          {isEntrypoint ? "Current entrypoint" : "Set as entrypoint"}
+          {isEntrypoint ? "Document root" : "Make document"}
         </button>
       )}
       {!isMulti && (
@@ -359,7 +362,7 @@ function TreeNodeItem({
   const isActive = node.file?.id === activeFileId;
   const isSelected = node.file ? selectedFileIds.has(node.file.id) : false;
   const isRenaming = node.file?.id === renamingFileId;
-  const isEntrypoint = !!node.file && !node.isDirectory && node.file.path === mainFilePath;
+  const isEntrypoint = !!node.file?.isDocument;
 
   useEffect(() => {
     if (isRenaming) {
@@ -497,7 +500,7 @@ function TreeNodeItem({
             <span className="min-w-0 flex-1 truncate">{node.name}</span>
             {isEntrypoint && (
               <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
-                Entry
+                Doc
               </span>
             )}
           </>
@@ -555,7 +558,7 @@ export function FileTree({
   shareToken = null,
   readOnly = false,
 }: FileTreeProps) {
-  const [creating, setCreating] = useState<"file" | "folder" | null>(null);
+  const [creating, setCreating] = useState<"document" | "file" | "folder" | null>(null);
   const [newName, setNewName] = useState("");
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -957,21 +960,28 @@ export function FileTree({
       e.preventDefault();
       if (!newName.trim() || !creating) return;
 
+      const requestedPath = newName.trim();
+      const filePath =
+        creating === "document" && !requestedPath.toLowerCase().endsWith(".tex")
+          ? `${requestedPath}.tex`
+          : requestedPath;
+
       try {
         const res = await fetch(withShareToken(`/api/projects/${projectId}/files`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            path: newName.trim(),
+            path: filePath,
             content: creating === "file" ? "" : undefined,
             isDirectory: creating === "folder",
+            isDocument: creating === "document",
           }),
         });
 
         if (res.ok) {
           const data = await res.json();
           await onFilesChanged();
-          if (creating === "file") {
+          if (creating !== "folder") {
             onFileSelect(data.file.id, data.file.path);
           }
         }
@@ -1021,7 +1031,7 @@ export function FileTree({
   );
 
   const handleSetEntrypoint = useCallback(
-    async (filePath: string) => {
+    async (fileId: string, filePath: string) => {
       try {
         const res = await fetch(
           withShareToken(`/api/projects/${projectId}/entrypoint`),
@@ -1039,14 +1049,16 @@ export function FileTree({
         }
 
         const data = await res.json().catch(() => ({}));
-        onMainFileChange(
-          typeof data.mainFile === "string" ? data.mainFile : filePath
-        );
+        await onFilesChanged();
+        const documentPath =
+          typeof data.mainFile === "string" ? data.mainFile : filePath;
+        onMainFileChange(documentPath);
+        onFileSelect(fileId, documentPath);
       } catch {
         setAlertMessage("Failed to set entrypoint");
       }
     },
-    [onMainFileChange, projectId, withShareToken]
+    [onFileSelect, onFilesChanged, onMainFileChange, projectId, withShareToken]
   );
 
   // ─── Context menu handlers ───────────────────────
@@ -1107,10 +1119,23 @@ export function FileTree({
             <button
               type="button"
               onClick={() => {
+                setCreating("document");
+                setNewName("");
+              }}
+              title="New Document"
+              aria-label="New Document"
+              className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+            >
+              <BookOpen className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setCreating("file");
                 setNewName("");
               }}
               title="New File"
+              aria-label="New File"
               className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
             >
               <FilePlus className="h-4 w-4" />
@@ -1122,6 +1147,7 @@ export function FileTree({
                 setNewName("");
               }}
               title="New Folder"
+              aria-label="New Folder"
               className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
             >
               <FolderPlus className="h-4 w-4" />
@@ -1130,6 +1156,7 @@ export function FileTree({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               title="Upload Files"
+              aria-label="Upload Files"
               className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
             >
               <Upload className="h-4 w-4" />
@@ -1144,6 +1171,8 @@ export function FileTree({
           <div className="flex items-center gap-1.5">
             {creating === "folder" ? (
               <Folder className="h-4 w-4 shrink-0 text-accent" />
+            ) : creating === "document" ? (
+              <BookOpen className="h-4 w-4 shrink-0 text-accent" />
             ) : (
               <FileIcon extension={newName.split(".").pop() ?? ""}className="h-4 w-4 shrink-0 text-text-muted" />
             )}
@@ -1162,10 +1191,21 @@ export function FileTree({
                 }
               }}
               placeholder={
-                creating === "folder" ? "folder-name" : "filename.tex"
+                creating === "folder"
+                  ? "folder-name"
+                  : creating === "document"
+                    ? "document-name"
+                    : "filename.tex"
               }
               className="w-full rounded border border-accent bg-bg-tertiary px-1.5 py-0.5 text-sm text-text-primary placeholder:text-text-muted outline-none"
             />
+            <button
+              type="submit"
+              aria-label={`Create ${creating}`}
+              className="rounded p-1 text-accent transition-colors hover:bg-accent/10"
+            >
+              <Check className="h-3.5 w-3.5" />
+            </button>
           </div>
         </form>
       )}
@@ -1238,9 +1278,9 @@ export function FileTree({
             !contextMenu.file.isDirectory &&
             contextMenu.file.path.toLowerCase().endsWith(".tex")
           }
-          isEntrypoint={contextMenu.file.path === mainFilePath}
+          isEntrypoint={contextMenu.file.isDocument}
           onSetEntrypoint={() => {
-            handleSetEntrypoint(contextMenu.file.path);
+            handleSetEntrypoint(contextMenu.file.id, contextMenu.file.path);
             closeContextMenu();
           }}
           onDelete={() => {

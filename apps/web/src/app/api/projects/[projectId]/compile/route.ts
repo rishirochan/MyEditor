@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { projects, builds } from "@/lib/db/schema";
+import { projects, projectFiles, builds } from "@/lib/db/schema";
 import { resolveProjectAccess } from "@/lib/auth/project-access";
 import { enqueueCompileJob } from "@/lib/compiler/compileQueue";
 import { broadcastBuildUpdate } from "@/lib/websocket/server";
@@ -8,7 +8,7 @@ import {
   isDedicatedWorkerHealthy,
   isWorkerExpectedInWeb,
 } from "@/lib/compiler/workerHealth";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import type { Engine } from "@myeditor/shared";
@@ -52,6 +52,7 @@ export async function POST(
     const buildUserId = access.user?.id ?? storageUserId;
     const runnerExpectedInWeb = isWorkerExpectedInWeb();
     let compileEngine: Engine = project.engine;
+    let mainFile = project.mainFile;
 
     const contentType = request.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
@@ -75,6 +76,33 @@ export async function POST(
         }
         compileEngine = requestedEngine;
       }
+
+      if (body && typeof body === "object" && "mainFile" in body) {
+        const requestedMainFile = (body as Record<string, unknown>).mainFile;
+        if (typeof requestedMainFile !== "string") {
+          return NextResponse.json({ error: "Invalid document" }, { status: 400 });
+        }
+        mainFile = requestedMainFile;
+      }
+    }
+
+    const [document] = await db
+      .select({ id: projectFiles.id })
+      .from(projectFiles)
+      .where(
+        and(
+          eq(projectFiles.projectId, projectId),
+          eq(projectFiles.path, mainFile),
+          eq(projectFiles.isDocument, true)
+        )
+      )
+      .limit(1);
+
+    if (!document) {
+      return NextResponse.json(
+        { error: "Document root not found" },
+        { status: 400 }
+      );
     }
 
     if (runnerExpectedInWeb) {
@@ -128,6 +156,7 @@ export async function POST(
       userId: buildUserId,
       status: "queued",
       engine: compileEngine,
+      mainFile,
     });
 
     await db
@@ -143,12 +172,13 @@ export async function POST(
       storageUserId,
       triggeredByUserId: actorUserId,
       engine: compileEngine,
-      mainFile: project.mainFile,
+      mainFile,
     });
 
     broadcastBuildUpdate(buildUserId, {
       projectId,
       buildId,
+      mainFile,
       status: "queued",
       triggeredByUserId: actorUserId,
     });

@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { builds } from "@/lib/db/schema";
 import { resolveProjectAccess } from "@/lib/auth/project-access";
 import { parseLatexLog } from "@/lib/compiler/logParser";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
 // ─── GET /api/projects/[projectId]/logs ────────────
@@ -20,10 +20,17 @@ export async function GET(
       return NextResponse.json({ error: access.error }, { status: access.status });
     }
 
+    const mainFile = request.nextUrl.searchParams.get("mainFile") ?? access.project.mainFile;
+
     const [latestBuild] = await db
       .select()
       .from(builds)
-      .where(eq(builds.projectId, projectId))
+      .where(
+        and(
+          eq(builds.projectId, projectId),
+          eq(builds.mainFile, mainFile)
+        )
+      )
       .orderBy(desc(builds.createdAt))
       .limit(1);
 

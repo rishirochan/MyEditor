@@ -7,13 +7,14 @@ import { completeStrictJson } from "@/lib/ai/client";
 import { getUserAiSettings } from "@/lib/ai/settings";
 import { validateFilePath } from "@/lib/utils/validation";
 import * as storage from "@/lib/storage";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import path from "path";
 
 const requestSchema = z.object({
   projectId: z.string().uuid(),
+  mainFile: z.string().trim().min(1).max(1000),
   activeFilePath: z.string().trim().max(1000).optional(),
   activeFileContent: z.string().optional(),
   errorLimit: z.number().int().min(1).max(20).optional(),
@@ -117,12 +118,14 @@ async function updateFileViaExistingApi(
 
 async function triggerCompileViaExistingApi(
   request: NextRequest,
-  projectId: string
+  projectId: string,
+  mainFile: string
 ): Promise<{ statusCode: number; payload: unknown }> {
   const url = new URL(`/api/projects/${projectId}/compile`, request.url);
   const res = await fetch(url, {
     method: "POST",
     headers: buildAuthHeaders(request),
+    body: JSON.stringify({ mainFile }),
     cache: "no-store",
   });
 
@@ -179,6 +182,7 @@ export async function POST(request: NextRequest) {
         id: projectFiles.id,
         path: projectFiles.path,
         isDirectory: projectFiles.isDirectory,
+        isDocument: projectFiles.isDocument,
       })
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId));
@@ -191,13 +195,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const mainFile = normalizeFilePath(parsed.data.mainFile);
+    if (!editableFiles.some((file) => file.isDocument && file.path === mainFile)) {
+      return NextResponse.json(
+        { error: "Document root not found" },
+        { status: 400 }
+      );
+    }
+
     const requestedActivePath = parsed.data.activeFilePath
       ? normalizeFilePath(parsed.data.activeFilePath)
       : "";
 
     const activeFile =
       editableFiles.find((file) => file.path === requestedActivePath) ??
-      editableFiles.find((file) => file.path === project.mainFile) ??
+      editableFiles.find((file) => file.path === mainFile) ??
       editableFiles.find((file) => file.path.toLowerCase().endsWith(".tex")) ??
       editableFiles[0];
 
@@ -218,7 +230,12 @@ export async function POST(request: NextRequest) {
         createdAt: builds.createdAt,
       })
       .from(builds)
-      .where(eq(builds.projectId, projectId))
+      .where(
+        and(
+          eq(builds.projectId, projectId),
+          eq(builds.mainFile, mainFile)
+        )
+      )
       .orderBy(desc(builds.createdAt))
       .limit(recentBuildLimit);
 
@@ -251,7 +268,7 @@ export async function POST(request: NextRequest) {
           id: project.id,
           name: project.name,
           engine: project.engine,
-          mainFile: project.mainFile,
+          mainFile,
         },
         activeFile: {
           path: activeFile.path,
@@ -358,7 +375,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const compile = await triggerCompileViaExistingApi(request, projectId);
+    const compile = await triggerCompileViaExistingApi(request, projectId, mainFile);
 
     return NextResponse.json(
       {

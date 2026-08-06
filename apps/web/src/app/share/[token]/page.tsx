@@ -12,6 +12,7 @@ interface ProjectFile {
   mimeType: string | null;
   sizeBytes: number | null;
   isDirectory: boolean | null;
+  isDocument: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -22,6 +23,7 @@ interface Build {
   userId: string;
   status: string;
   engine: string;
+  mainFile: string;
   logs: string | null;
   durationMs: number | null;
   pdfPath: string | null;

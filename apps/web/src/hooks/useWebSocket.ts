@@ -16,6 +16,7 @@ import type {
 interface BuildCompleteData {
   projectId: string;
   buildId: string;
+  mainFile: string;
   status: BuildStatus;
   pdfUrl: string | null;
   logs: string;
@@ -27,6 +28,7 @@ interface BuildCompleteData {
 interface BuildStatusData {
   projectId: string;
   buildId: string;
+  mainFile: string;
   status: "queued" | "compiling";
   triggeredByUserId?: string | null;
 }

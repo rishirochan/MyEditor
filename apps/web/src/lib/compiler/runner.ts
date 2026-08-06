@@ -229,6 +229,7 @@ class CompileRunner {
       broadcastBuildUpdate(notifyUserId, {
         projectId,
         buildId,
+        mainFile,
         status: "compiling",
         triggeredByUserId: actorUserId,
       });
@@ -322,8 +323,11 @@ class CompileRunner {
       broadcastBuildUpdate(notifyUserId, {
         projectId,
         buildId,
+        mainFile,
         status: finalStatus,
-        pdfUrl: pdfExists ? `/api/projects/${projectId}/pdf` : null,
+        pdfUrl: pdfExists
+          ? `/api/projects/${projectId}/pdf?mainFile=${encodeURIComponent(mainFile)}`
+          : null,
         logs: containerResult.canceled
           ? "Build canceled by user."
           : containerResult.logs,
@@ -345,6 +349,7 @@ class CompileRunner {
       broadcastBuildUpdate(notifyUserId, {
         projectId,
         buildId,
+        mainFile,
         status: "error",
         pdfUrl: null,
         logs: `Internal compilation error: ${errorMessage}`,
@@ -487,6 +492,7 @@ class CompileRunner {
     broadcastBuildUpdate(notifyUserId, {
       projectId: data.projectId,
       buildId: data.buildId,
+      mainFile: data.mainFile,
       status: "canceled",
       pdfUrl: null,
       logs: message,

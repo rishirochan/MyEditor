@@ -88,6 +88,7 @@ export async function POST(
         userId: user.id,
         status: "queued",
         engine: compileEngine,
+        mainFile: project.mainFile,
       });
 
       await enqueueCompileJob({
@@ -103,6 +104,7 @@ export async function POST(
       broadcastBuildUpdate(user.id, {
         projectId,
         buildId,
+        mainFile: project.mainFile,
         status: "queued",
         triggeredByUserId: user.id,
       });

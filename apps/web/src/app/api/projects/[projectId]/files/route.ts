@@ -10,6 +10,13 @@ import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 
+const NEW_DOCUMENT_CONTENT = `\\documentclass{article}
+
+\\begin{document}
+
+\\end{document}
+`;
+
 // ─── GET /api/projects/[projectId]/files ───────────
 // List all files in a project.
 
@@ -75,13 +82,20 @@ export async function POST(
         );
       }
 
-      const { path: filePath, content, isDirectory } = parsed.data;
+      const { path: filePath, content, isDirectory, isDocument = false } = parsed.data;
 
       // Validate the file path for security
       const pathValidation = validateFilePath(filePath);
       if (!pathValidation.valid) {
         return NextResponse.json(
           { error: pathValidation.error },
+          { status: 400 }
+        );
+      }
+
+      if (isDocument && (isDirectory || path.extname(filePath).toLowerCase() !== ".tex")) {
+        return NextResponse.json(
+          { error: "Documents must be .tex files" },
           { status: 400 }
         );
       }
@@ -115,7 +129,7 @@ export async function POST(
         await storage.createDirectory(fullPath);
       } else {
         // Write file content to disk
-        const fileContent = content ?? "";
+        const fileContent = content ?? (isDocument ? NEW_DOCUMENT_CONTENT : "");
         await storage.writeFile(fullPath, fileContent);
         sizeBytes = Buffer.byteLength(fileContent, "utf-8");
       }
@@ -136,6 +150,7 @@ export async function POST(
           mimeType,
           sizeBytes,
           isDirectory: isDirectory ?? false,
+          isDocument,
         })
         .returning();
 

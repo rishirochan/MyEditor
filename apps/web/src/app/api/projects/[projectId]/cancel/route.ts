@@ -20,6 +20,7 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
+    const requestedBuildId = request.nextUrl.searchParams.get("buildId");
 
     const access = await resolveProjectAccess(request, projectId);
     if (!access.access) {
@@ -35,6 +36,7 @@ export async function POST(
     const [build] = await db
       .select({
         id: builds.id,
+        mainFile: builds.mainFile,
         status: builds.status,
         createdAt: builds.createdAt,
       })
@@ -42,7 +44,8 @@ export async function POST(
       .where(
         and(
           eq(builds.projectId, projectId),
-          inArray(builds.status, ["queued", "compiling"])
+          inArray(builds.status, ["queued", "compiling"]),
+          ...(requestedBuildId ? [eq(builds.id, requestedBuildId)] : [])
         )
       )
       .orderBy(desc(builds.createdAt))
@@ -111,6 +114,7 @@ export async function POST(
     broadcastBuildUpdate(notifyUserId, {
       projectId,
       buildId: build.id,
+      mainFile: build.mainFile,
       status: "canceled",
       pdfUrl: null,
       logs: "Build canceled by user.",

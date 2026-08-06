@@ -193,6 +193,7 @@ export async function POST(request: NextRequest) {
               mimeType,
               sizeBytes,
               isDirectory: false,
+              isDocument: filePath === "main.tex",
             };
           })
         );
