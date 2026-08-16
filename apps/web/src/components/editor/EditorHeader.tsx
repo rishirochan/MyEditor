@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Check,
   Ban,
+  Sparkles,
 } from "lucide-react";
 import {
   Tooltip,
@@ -62,6 +63,8 @@ interface EditorHeaderProps {
   shareToken?: string | null;
   canManageShare?: boolean;
   canEdit?: boolean;
+  aiPanelOpen?: boolean;
+  onToggleAiPanel?: () => void;
 }
 
 // ─── Build Status Badge ────────────────────────────
@@ -140,6 +143,8 @@ export function EditorHeader({
   shareToken = null,
   canManageShare = role === "owner",
   canEdit = true,
+  aiPanelOpen = false,
+  onToggleAiPanel,
 }: EditorHeaderProps) {
   const [shareOpen, setShareOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
@@ -360,6 +365,31 @@ export function EditorHeader({
               <p>Auto-compile {autoCompileEnabled ? "on" : "off"}</p>
             </TooltipContent>
           </Tooltip>
+
+          {/* AI assistant toggle */}
+          {onToggleAiPanel && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onToggleAiPanel}
+                  aria-pressed={aiPanelOpen}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-lg border px-3 py-1 text-sm font-medium transition-colors",
+                    aiPanelOpen
+                      ? "border-accent/70 bg-accent/15 text-accent"
+                      : "border-border text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                  )}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">AI</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{aiPanelOpen ? "Hide AI assistant" : "Ask AI about this document"}</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </TooltipProvider>
       )}
 
