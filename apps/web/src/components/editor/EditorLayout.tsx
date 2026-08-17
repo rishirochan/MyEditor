@@ -1844,11 +1844,6 @@ export function EditorLayout({
                         pendingSelection={aiPendingSelection}
                         onClearSelection={() => setAiPendingSelection(null)}
                         onEditsApplied={handleAiEditsApplied}
-                        onClose={() => {
-                          setAiPanelOpen(false);
-                          setAiTabActive(false);
-                          setAiPendingSelection(null);
-                        }}
                       />
                     </div>
                   )}

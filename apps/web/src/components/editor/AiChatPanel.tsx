@@ -2,18 +2,34 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { cn } from "@/lib/utils/cn";
-import { Sparkles, Send, X, Loader2 } from "lucide-react";
+import { Sparkles, Send, X, Loader2, Undo2 } from "lucide-react";
 
-// ─── Types ──────────────────────────────────────────
+interface AiEdit {
+  filePath: string;
+  oldText: string;
+  newText: string;
+  startIndex: number;
+  line: number;
+}
+
+interface SkippedAiEdit {
+  filePath: string;
+  reason: string;
+}
 
 interface AiMessage {
+  id: string;
   role: "user" | "assistant";
   content: string;
   error?: boolean;
-  /** Shown as a small footer when the assistant applied edits */
-  editsApplied?: number;
-  /** "Re: lines X–Y" label shown on user bubbles sent with a selection */
+  activity?: string[];
+  appliedEdits?: AiEdit[];
+  skippedEdits?: SkippedAiEdit[];
   selectionLabel?: string;
+  canUndo?: boolean;
+  undoing?: boolean;
+  undone?: boolean;
+  undoError?: string;
 }
 
 interface AiSelection {
@@ -22,18 +38,110 @@ interface AiSelection {
   text: string;
 }
 
+interface ChatResult {
+  reply: string;
+  appliedEdits: AiEdit[];
+  skippedEdits: SkippedAiEdit[];
+}
+
+interface ChatResponse {
+  activity: string[];
+  errorMessage?: string;
+  result?: ChatResult;
+}
+
+type ChatEvent =
+  | { type: "activity"; message: string; append?: boolean }
+  | { type: "result" } & ChatResult
+  | { type: "error"; message: string };
+
 interface AiChatPanelProps {
   projectId: string;
   activeFile: { id: string; path: string } | null;
-  /** Unsaved editor buffer, or undefined when the server should read disk */
   getFileContent: () => string | undefined;
   pendingSelection: AiSelection | null;
   onClearSelection: () => void;
   onEditsApplied: (touchedPaths: string[]) => void;
-  onClose: () => void;
 }
 
-// ─── AiChatPanel ────────────────────────────────────
+function parseChatResult(value: unknown): ChatResult {
+  const data = value as Partial<ChatResult>;
+  return {
+    reply: typeof data.reply === "string" ? data.reply : "",
+    appliedEdits: Array.isArray(data.appliedEdits) ? data.appliedEdits : [],
+    skippedEdits: Array.isArray(data.skippedEdits) ? data.skippedEdits : [],
+  };
+}
+
+async function readNdjson(
+  response: Response,
+  onEvent: (event: ChatEvent) => void
+) {
+  const reader = response.body?.getReader();
+  if (!reader) return;
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const readLine = (line: string) => {
+    if (!line.trim()) return;
+    try {
+      onEvent(JSON.parse(line) as ChatEvent);
+    } catch {
+      // Ignore malformed diagnostics; the final result still determines success.
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    lines.forEach(readLine);
+    if (done) break;
+  }
+  readLine(buffer);
+}
+
+async function readChatResponse(
+  response: Response,
+  onActivity: (activity: string[]) => void
+): Promise<ChatResponse> {
+  const activity: string[] = [];
+  let result: ChatResult | undefined;
+  let errorMessage: string | undefined;
+
+  if (response.headers.get("content-type")?.includes("application/x-ndjson")) {
+    await readNdjson(response, (streamEvent) => {
+      if (streamEvent.type === "activity") {
+        if (streamEvent.append && activity.length > 0) {
+          activity[activity.length - 1] += streamEvent.message;
+        } else {
+          activity.push(streamEvent.message);
+        }
+        onActivity([...activity]);
+      } else if (streamEvent.type === "result") {
+        result = parseChatResult(streamEvent);
+      } else if (streamEvent.type === "error") {
+        errorMessage = streamEvent.message;
+      }
+    });
+  } else {
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) result = parseChatResult(data);
+    else errorMessage = typeof data.error === "string" ? data.error : undefined;
+  }
+
+  return { activity, errorMessage, result };
+}
+
+function historyContent(message: AiMessage) {
+  if (!message.appliedEdits?.length) return message.content;
+
+  const editBlock = JSON.stringify(message.appliedEdits).slice(0, 6000);
+  const metadata = `\n\n[Applied edits: ${editBlock}]`;
+  if (metadata.length >= 8000) return metadata.slice(0, 8000);
+  return `${message.content.slice(0, Math.max(0, 8000 - metadata.length))}${metadata}`;
+}
 
 export function AiChatPanel({
   projectId,
@@ -42,66 +150,188 @@ export function AiChatPanel({
   pendingSelection,
   onClearSelection,
   onEditsApplied,
-  onClose,
 }: AiChatPanelProps) {
-  // ponytail: per-file threads kept in this component's memory only, so they are
-  // lost on reload and on closing the panel (it unmounts); lift to EditorLayout
-  // or sessionStorage keyed by projectId if conversations should survive.
+  // ponytail: per-file threads are memory-only; lift them only if persistence is needed.
   const [threads, setThreads] = useState<Map<string, AiMessage[]>>(new Map());
   const [input, setInput] = useState("");
-  // ponytail: one request at a time, tagged with the file it belongs to so a
-  // mid-request file switch shows the reply/spinner on the right thread.
   const [sendingFileId, setSendingFileId] = useState<string | null>(null);
+  const [activity, setActivity] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageIdRef = useRef(0);
 
   const sending = sendingFileId !== null;
   const thinking = activeFile !== null && sendingFileId === activeFile.id;
   const messages = activeFile ? threads.get(activeFile.id) ?? [] : [];
+  const lastUndoableMessageId = messages.reduce<string | undefined>(
+    (lastId, message) =>
+      message.role === "assistant" &&
+      message.appliedEdits?.length &&
+      message.canUndo !== false &&
+      !message.undone
+        ? message.id
+        : lastId,
+    undefined
+  );
 
-  // Auto-scroll to bottom on new messages / thinking indicator
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, thinking]);
+  }, [messages.length, thinking, activity.length]);
+
+  function nextMessageId() {
+    messageIdRef.current += 1;
+    return String(messageIdRef.current);
+  }
 
   function appendMessage(fileId: string, message: AiMessage) {
-    setThreads((prev) => {
-      const next = new Map(prev);
+    setThreads((previous) => {
+      const next = new Map(previous);
       next.set(fileId, [...(next.get(fileId) ?? []), message]);
       return next;
     });
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  function updateMessage(
+    fileId: string,
+    messageId: string,
+    update: Partial<AiMessage>
+  ) {
+    setThreads((previous) => {
+      const next = new Map(previous);
+      next.set(
+        fileId,
+        (next.get(fileId) ?? []).map((message) =>
+          message.id === messageId ? { ...message, ...update } : message
+        )
+      );
+      return next;
+    });
+  }
+
+  function applyResult(
+    fileId: string,
+    result: ChatResult,
+    completedActivity: string[],
+    canUndo = true
+  ) {
+    appendMessage(fileId, {
+      id: nextMessageId(),
+      role: "assistant",
+      content: result.reply,
+      activity: completedActivity,
+      appliedEdits: result.appliedEdits,
+      skippedEdits: result.skippedEdits,
+      canUndo,
+    });
+
+    const touchedPaths = [
+      ...new Set(result.appliedEdits.map((edit) => edit.filePath)),
+    ];
+    if (touchedPaths.length > 0) onEditsApplied(touchedPaths);
+  }
+
+  async function handleUndo(fileId: string, message: AiMessage) {
+    if (
+      !activeFile ||
+      !message.appliedEdits?.length ||
+      message.undoing ||
+      sending
+    ) {
+      return;
+    }
+
+    updateMessage(fileId, message.id, { undoing: true, undoError: undefined });
+    setSendingFileId(fileId);
+    setActivity([]);
+    try {
+      const fileContent = getFileContent();
+      const response = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          filePath: activeFile.path,
+          ...(fileContent !== undefined ? { fileContent } : {}),
+          undoEdits: [...message.appliedEdits].reverse().map((edit) => ({
+            filePath: edit.filePath,
+            oldText: edit.newText,
+            newText: edit.oldText,
+            startIndex: edit.startIndex,
+          })),
+        }),
+      });
+      const chatResponse = await readChatResponse(response, setActivity);
+
+      if (!response.ok || chatResponse.errorMessage || !chatResponse.result) {
+        updateMessage(fileId, message.id, {
+          undoing: false,
+          undoError:
+            chatResponse.errorMessage ?? "Undo failed. Please try again.",
+        });
+        appendMessage(fileId, {
+          id: nextMessageId(),
+          role: "assistant",
+          content:
+            chatResponse.errorMessage ?? "Undo failed. Please try again.",
+          error: true,
+          activity: chatResponse.activity,
+        });
+        return;
+      }
+
+      applyResult(fileId, chatResponse.result, chatResponse.activity, false);
+      const fullyUndone =
+        chatResponse.result.appliedEdits.length === message.appliedEdits.length;
+      updateMessage(fileId, message.id, {
+        undoing: false,
+        undone: fullyUndone,
+        undoError: fullyUndone
+          ? undefined
+          : "Undo was only partially applied. See details below.",
+      });
+    } catch {
+      updateMessage(fileId, message.id, {
+        undoing: false,
+        undoError: "Undo failed. Please try again.",
+      });
+    } finally {
+      setActivity([]);
+      setSendingFileId(null);
+    }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     const trimmed = input.trim();
     if (!trimmed || !activeFile || sending) return;
 
     const fileId = activeFile.id;
     const filePath = activeFile.path;
     const selection = pendingSelection;
-
     const userMessage: AiMessage = {
+      id: nextMessageId(),
       role: "user",
       content: trimmed,
       selectionLabel: selection
         ? `Re: lines ${selection.fromLine}–${selection.toLine}`
         : undefined,
     };
-
-    // Full history (error bubbles excluded), capped at the last 30 messages
     const history = [...(threads.get(fileId) ?? []), userMessage]
-      .filter((m) => !m.error)
+      .filter((message) => !message.error)
       .slice(-30)
-      .map((m) => ({ role: m.role, content: m.content }));
+      .map((message) => ({
+        role: message.role,
+        content: historyContent(message),
+      }));
 
     appendMessage(fileId, userMessage);
     setInput("");
     if (selection) onClearSelection();
     setSendingFileId(fileId);
+    setActivity([]);
 
     try {
       const fileContent = getFileContent();
-      const res = await fetch("/api/ai/chat", {
+      const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -112,78 +342,45 @@ export function AiChatPanel({
           ...(selection ? { selection } : {}),
         }),
       });
+      const chatResponse = await readChatResponse(response, setActivity);
 
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
+      if (!response.ok || chatResponse.errorMessage || !chatResponse.result) {
         appendMessage(fileId, {
+          id: nextMessageId(),
           role: "assistant",
           content:
-            typeof data.error === "string" && data.error.length > 0
-              ? data.error
-              : "AI request failed. Please try again.",
+            chatResponse.errorMessage ??
+            "AI request failed. Please try again.",
           error: true,
+          activity: chatResponse.activity,
         });
         return;
       }
 
-      const appliedEdits: { filePath?: string }[] = Array.isArray(
-        data.appliedEdits
-      )
-        ? data.appliedEdits
-        : [];
-
-      appendMessage(fileId, {
-        role: "assistant",
-        content: typeof data.reply === "string" ? data.reply : "",
-        editsApplied: appliedEdits.length > 0 ? appliedEdits.length : undefined,
-      });
-
-      if (appliedEdits.length > 0) {
-        const touchedPaths = [
-          ...new Set(
-            appliedEdits
-              .map((edit) => edit.filePath)
-              .filter((p): p is string => typeof p === "string")
-          ),
-        ];
-        if (touchedPaths.length > 0) onEditsApplied(touchedPaths);
-      }
+      applyResult(fileId, chatResponse.result, chatResponse.activity);
     } catch {
       appendMessage(fileId, {
+        id: nextMessageId(),
         role: "assistant",
-        content: "Network error — please try again.",
+        content: "Network error. Please try again.",
         error: true,
+        activity,
       });
     } finally {
+      setActivity([]);
       setSendingFileId(null);
     }
   }
 
   return (
-    <div className="flex h-full flex-col border-l border-border bg-bg-secondary">
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <Sparkles className="h-4 w-4 shrink-0 text-accent" />
-        <span className="text-sm font-medium text-text-primary">
-          AI Assistant
+    <div className="flex h-full flex-col bg-bg-secondary">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
+        <span className="min-w-0 flex-1 truncate text-xs text-text-muted">
+          {activeFile ? activeFile.path : "No file open"}
         </span>
-        {activeFile && (
-          <span className="min-w-0 flex-1 truncate text-xs text-text-muted">
-            {activeFile.path}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close AI assistant"
-          className="ml-auto rounded-md p-1 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
       </div>
 
-      {/* Messages */}
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
         {!activeFile ? (
           <div className="flex h-full items-center justify-center">
@@ -194,56 +391,125 @@ export function AiChatPanel({
         ) : messages.length === 0 && !thinking ? (
           <div className="flex h-full items-center justify-center">
             <p className="px-4 text-center text-xs text-text-muted">
-              Ask about this document — I can edit it directly. Select lines in
+              Ask about this document. I can edit it directly. Select lines in
               the editor to focus my attention.
             </p>
           </div>
         ) : (
-          messages.map((msg, index) => (
+          messages.map((message) => (
             <div
-              key={index}
+              key={message.id}
               className={cn(
                 "flex flex-col",
-                msg.role === "user" && "items-end"
+                message.role === "user" && "items-end"
               )}
             >
               <div
                 className={cn(
                   "max-w-[85%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-xs leading-relaxed",
-                  msg.role === "user"
+                  message.role === "user"
                     ? "bg-accent/15 text-text-primary"
-                    : msg.error
+                    : message.error
                       ? "border border-error/30 bg-error/10 text-error"
                       : "bg-bg-elevated text-text-secondary"
                 )}
               >
-                {msg.selectionLabel && (
+                {message.selectionLabel && (
                   <p className="mb-1 text-[10px] font-semibold text-accent">
-                    {msg.selectionLabel}
+                    {message.selectionLabel}
                   </p>
                 )}
-                {msg.content}
-                {msg.editsApplied !== undefined && (
-                  <p className="mt-1.5 border-t border-border/60 pt-1 text-[10px] font-medium text-accent">
-                    ✎ Applied {msg.editsApplied} edit
-                    {msg.editsApplied === 1 ? "" : "s"}
-                  </p>
-                )}
+                {message.content}
+                {message.activity?.length ? (
+                  <details className="mt-1.5 border-t border-border/60 pt-1 text-[10px] text-text-muted">
+                    <summary className="cursor-pointer font-medium">
+                      Activity ({message.activity.length})
+                    </summary>
+                    <ul
+                      className="mt-1 space-y-0.5 pl-3"
+                      aria-label="AI activity log"
+                    >
+                      {message.activity.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+                {message.appliedEdits?.length ? (
+                  <div className="mt-1.5 border-t border-border/60 pt-1 text-[10px] text-accent">
+                    <p className="font-medium">
+                      ✎ Applied {message.appliedEdits.length} edit
+                      {message.appliedEdits.length === 1 ? "" : "s"}
+                    </p>
+                    <ul className="mt-0.5 space-y-0.5 text-text-muted">
+                      {message.appliedEdits.map((edit, index) => (
+                        <li key={`${edit.filePath}-${edit.line}-${index}`}>
+                          {edit.filePath}:{edit.line}
+                        </li>
+                      ))}
+                    </ul>
+                    {message.id === lastUndoableMessageId && !message.undone ? (
+                      <button
+                        type="button"
+                        onClick={() => handleUndo(activeFile.id, message)}
+                        disabled={sending || message.undoing}
+                        className="mt-1 inline-flex items-center gap-1 font-medium text-accent hover:text-text-primary disabled:opacity-50"
+                      >
+                        <Undo2 className="h-3 w-3" />
+                        {message.undoing ? "Undoing…" : "Undo"}
+                      </button>
+                    ) : message.undone ? (
+                      <p className="mt-1 text-text-muted">Undone</p>
+                    ) : null}
+                    {message.undoError && (
+                      <p className="mt-1 text-error">{message.undoError}</p>
+                    )}
+                  </div>
+                ) : null}
+                {message.skippedEdits?.length ? (
+                  <ul
+                    className="mt-1.5 space-y-0.5 border-t border-error/30 pt-1 text-[10px] text-error"
+                    aria-label="Edits not applied"
+                  >
+                    {message.skippedEdits.map((edit, index) => (
+                      <li key={`${edit.filePath}-${index}`}>
+                        Not applied: {edit.filePath}. {edit.reason}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
             </div>
           ))
         )}
 
         {sending && (
-          <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            {thinking ? "Thinking…" : "Waiting on a reply for another file…"}
+          <div
+            className="text-[11px] text-text-muted"
+            role="status"
+            aria-live="polite"
+          >
+            {thinking ? (
+              <div className="rounded-md bg-bg-elevated px-2.5 py-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Working
+                </div>
+                <ul className="mt-1 space-y-0.5 pl-3">
+                  {(activity.length ? activity : ["Starting request…"]).map(
+                    (item, index) => (
+                      <li key={`${item}-${index}`}>{item}</li>
+                    )
+                  )}
+                </ul>
+              </div>
+            ) : (
+              "Waiting on a reply for another file…"
+            )}
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Selection chip */}
       {pendingSelection && (
         <div className="border-t border-border px-3 pt-2">
           <div className="flex items-start gap-2 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5">
@@ -268,7 +534,6 @@ export function AiChatPanel({
         </div>
       )}
 
-      {/* Input */}
       <form
         onSubmit={handleSubmit}
         className={cn(
@@ -279,7 +544,7 @@ export function AiChatPanel({
         <input
           type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(event) => setInput(event.target.value)}
           maxLength={8000}
           disabled={sending || !activeFile}
           placeholder={

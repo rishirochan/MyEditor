@@ -11,6 +11,20 @@ interface CodexAuthTokens {
   accountId: string;
 }
 
+export type CodexProgressEvent =
+  | {
+      type: "status";
+      status:
+        | "response.created"
+        | "response.in_progress"
+        | "response.completed"
+        | "response.failed"
+        | "response.incomplete";
+    }
+  | { type: "reasoning_summary"; text: string };
+
+type CodexProgressCallback = (event: CodexProgressEvent) => void;
+
 async function loadCodexTokens(): Promise<CodexAuthTokens> {
   const auth = await readCodexAuth();
   const accessToken = auth?.tokens?.access_token?.trim();
@@ -23,7 +37,7 @@ async function loadCodexTokens(): Promise<CodexAuthTokens> {
   return { accessToken, accountId };
 }
 
-function extractTextFromSse(raw: string): string {
+export function extractTextFromSse(raw: string): string {
   let doneText = "";
   const deltaPieces: string[] = [];
 
@@ -72,6 +86,92 @@ function extractTextFromSse(raw: string): string {
 
   if (doneText.trim()) return doneText;
   return deltaPieces.join("");
+}
+
+export function parseCodexSseEvent(record: string): Record<string, unknown> | null {
+  const data = record
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .join("\n");
+  if (!data || data === "[DONE]") return null;
+
+  try {
+    return JSON.parse(data) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function emitCodexProgress(
+  event: Record<string, unknown>,
+  onProgress: CodexProgressCallback | undefined,
+  summaryDeltaKeys: Set<string>
+): void {
+  if (!onProgress || typeof event.type !== "string") return;
+
+  switch (event.type) {
+    case "response.created":
+    case "response.in_progress":
+    case "response.completed":
+    case "response.failed":
+    case "response.incomplete":
+      onProgress({ type: "status", status: event.type });
+      return;
+    case "response.reasoning_summary_text.delta": {
+      if (typeof event.delta !== "string" || !event.delta) return;
+      summaryDeltaKeys.add(`${event.item_id ?? ""}:${event.summary_index ?? ""}`);
+      onProgress({ type: "reasoning_summary", text: event.delta });
+      return;
+    }
+    case "response.reasoning_summary_text.done": {
+      if (typeof event.text !== "string" || !event.text) return;
+      const key = `${event.item_id ?? ""}:${event.summary_index ?? ""}`;
+      if (!summaryDeltaKeys.has(key)) {
+        onProgress({ type: "reasoning_summary", text: event.text });
+      }
+    }
+  }
+}
+
+async function readResponseBody(
+  body: ReadableStream<Uint8Array> | null,
+  onProgress?: CodexProgressCallback
+): Promise<string> {
+  if (!body) return "";
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const summaryDeltaKeys = new Set<string>();
+  let raw = "";
+  let sseBuffer = "";
+
+  const processSseRecord = (record: string) => {
+    const event = parseCodexSseEvent(record);
+    if (event) emitCodexProgress(event, onProgress, summaryDeltaKeys);
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value, { stream: true });
+    raw += chunk;
+    sseBuffer += chunk;
+
+    let separator = sseBuffer.match(/\r?\n\r?\n/);
+    while (separator?.index !== undefined) {
+      processSseRecord(sseBuffer.slice(0, separator.index));
+      sseBuffer = sseBuffer.slice(separator.index + separator[0].length);
+      separator = sseBuffer.match(/\r?\n\r?\n/);
+    }
+  }
+
+  const tail = decoder.decode();
+  raw += tail;
+  sseBuffer += tail;
+  processSseRecord(sseBuffer);
+  return raw;
 }
 
 function extractAssistantText(rawBody: string, contentType: string | null): string {
@@ -123,6 +223,7 @@ export async function completeWithCodexCli(params: {
   effort?: string | null;
   systemPrompt: string;
   userPrompt: string;
+  onProgress?: CodexProgressCallback;
 }): Promise<string> {
   const { accessToken, accountId } = await loadCodexTokens();
   const controller = new AbortController();
@@ -147,9 +248,10 @@ export async function completeWithCodexCli(params: {
         },
       ],
     };
-    if (effort) {
-      requestBody.reasoning = { effort };
-    }
+    requestBody.reasoning = {
+      summary: "auto",
+      ...(effort ? { effort } : {}),
+    };
 
     const res = await fetch(CODEX_RESPONSES_URL, {
       method: "POST",
@@ -166,7 +268,7 @@ export async function completeWithCodexCli(params: {
       signal: controller.signal,
     });
 
-    const responseBody = await res.text().catch(() => "");
+    const responseBody = await readResponseBody(res.body, params.onProgress);
     if (!res.ok) {
       throw new Error(
         `Codex request failed (${res.status}): ${responseBody || res.statusText}. If login expired, run Log in in Settings or \`codex login\`.`
