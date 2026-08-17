@@ -2,7 +2,12 @@ import type { AiModelSettings } from "@/lib/ai/types";
 import { isCliProvider } from "@/lib/ai/types";
 import { resolveAiApiKey, resolveAiBaseUrl } from "@/lib/ai/settings";
 import { completeWithClaudeCli } from "@/lib/ai/cliClaude";
-import { completeWithCodexCli } from "@/lib/ai/cliCodex";
+import {
+  completeWithCodexCli,
+  type CodexProgressEvent,
+} from "@/lib/ai/cliCodex";
+
+export type AiProgressCallback = (event: CodexProgressEvent) => void;
 
 export interface StrictJsonCompletionParams {
   modelSettings: AiModelSettings;
@@ -10,6 +15,7 @@ export interface StrictJsonCompletionParams {
   userPrompt: string;
   temperature?: number;
   maxTokens?: number;
+  onProgress?: AiProgressCallback;
 }
 
 function trimTrailingSlash(value: string): string {
@@ -168,6 +174,7 @@ async function callCliProvider(
     effort: params.modelSettings.effort,
     systemPrompt: params.systemPrompt,
     userPrompt: params.userPrompt,
+    onProgress: params.onProgress,
   });
 }
 

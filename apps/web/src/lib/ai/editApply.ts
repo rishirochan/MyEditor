@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 
+const MAX_AI_EDIT_CHARS = 50_000;
+
 export interface AiEdit {
   filePath: string;
   replaceFrom: number;
@@ -14,6 +16,35 @@ export const aiEditSchema = z.object({
   replaceTo: z.number().int().min(1),
   newText: z.string(),
 });
+
+export const aiTextEditSchema = z.object({
+  filePath: z.string().trim().min(1).max(1000),
+  oldText: z.string().min(1).max(MAX_AI_EDIT_CHARS),
+  newText: z.string().max(MAX_AI_EDIT_CHARS),
+});
+
+export type AiTextEdit = z.infer<typeof aiTextEditSchema>;
+
+export interface AppliedTextEdit {
+  filePath: string;
+  originalText: string;
+  replacementText: string;
+  startIndex: number;
+  resultingLine: number;
+}
+
+export type ApplyTextEditResult =
+  | { applied: true; content: string; edit: AppliedTextEdit }
+  | {
+      applied: false;
+      content: string;
+      reason:
+        | "Target text is empty"
+        | "Target text not found"
+        | "Target text is ambiguous"
+        | "Target text changed";
+      matchCount: number;
+    };
 
 export function normalizeFilePath(value: string): string {
   return value.trim().replace(/^\.\//, "");
@@ -43,6 +74,80 @@ export function applyLineEdits(content: string, edits: AiEdit[]): string {
   }
 
   return lines.join("\n");
+}
+
+export function applyTextEdit(
+  content: string,
+  edit: AiTextEdit & { startIndex?: number }
+): ApplyTextEditResult {
+  if (!edit.oldText) {
+    return {
+      applied: false,
+      content,
+      reason: "Target text is empty",
+      matchCount: 0,
+    };
+  }
+
+  if (
+    edit.startIndex !== undefined &&
+    content.slice(edit.startIndex, edit.startIndex + edit.oldText.length) !==
+      edit.oldText
+  ) {
+    return {
+      applied: false,
+      content,
+      reason: "Target text changed",
+      matchCount: 0,
+    };
+  }
+
+  let matchCount = edit.startIndex === undefined ? 0 : 1;
+  const matchIndex = edit.startIndex ?? content.indexOf(edit.oldText);
+  if (edit.startIndex !== undefined) {
+    return applyUniqueTextEdit(content, edit, matchIndex);
+  }
+
+  for (
+    let index = matchIndex;
+    index !== -1;
+    index = content.indexOf(edit.oldText, index + 1)
+  ) {
+    matchCount += 1;
+  }
+
+  if (matchCount !== 1) {
+    return {
+      applied: false,
+      content,
+      reason:
+        matchCount === 0 ? "Target text not found" : "Target text is ambiguous",
+      matchCount,
+    };
+  }
+
+  return applyUniqueTextEdit(content, edit, matchIndex);
+}
+
+function applyUniqueTextEdit(
+  content: string,
+  edit: AiTextEdit,
+  matchIndex: number
+): ApplyTextEditResult {
+  return {
+    applied: true,
+    content:
+      content.slice(0, matchIndex) +
+      edit.newText +
+      content.slice(matchIndex + edit.oldText.length),
+    edit: {
+      filePath: edit.filePath,
+      originalText: edit.oldText,
+      replacementText: edit.newText,
+      startIndex: matchIndex,
+      resultingLine: content.slice(0, matchIndex).split("\n").length,
+    },
+  };
 }
 
 export function buildAuthHeaders(request: NextRequest): HeadersInit {

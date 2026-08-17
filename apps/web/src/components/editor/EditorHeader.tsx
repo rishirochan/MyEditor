@@ -4,13 +4,10 @@ import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import {
   Play,
-  Download,
-  FileArchive,
   Loader2,
   Square,
   CheckCircle2,
   XCircle,
-  Share2,
   ChevronDown,
   Check,
   Ban,
@@ -32,7 +29,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { AppHeader } from "@/components/AppHeader";
 import { PresenceAvatars } from "@/components/editor/PresenceAvatars";
-import { ShareDialog } from "@/components/editor/ShareDialog";
 import type { PresenceUser } from "@myeditor/shared";
 
 // ─── Types ──────────────────────────────────────────
@@ -59,9 +55,7 @@ interface EditorHeaderProps {
   followingUserId?: string | null;
   onFollowUser?: (userId: string) => void;
   isSharedProject?: boolean;
-  onShareUpdated?: () => void;
   shareToken?: string | null;
-  canManageShare?: boolean;
   canEdit?: boolean;
   aiPanelOpen?: boolean;
   onToggleAiPanel?: () => void;
@@ -139,23 +133,14 @@ export function EditorHeader({
   followingUserId,
   onFollowUser,
   isSharedProject = false,
-  onShareUpdated,
   shareToken = null,
-  canManageShare = role === "owner",
   canEdit = true,
   aiPanelOpen = false,
   onToggleAiPanel,
 }: EditorHeaderProps) {
-  const [shareOpen, setShareOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [sharedProjects, setSharedProjects] = useState<ProjectListItem[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
-
-  function withShareToken(url: string) {
-    if (!shareToken) return url;
-    const separator = url.includes("?") ? "&" : "?";
-    return `${url}${separator}share=${encodeURIComponent(shareToken)}`;
-  }
 
   async function fetchProjects() {
     setLoadingProjects(true);
@@ -170,22 +155,6 @@ export function EditorHeader({
       // Silently fail
     }
     setLoadingProjects(false);
-  }
-
-  function handleDownloadPdf() {
-    if (!documentPath) return;
-    window.open(
-      withShareToken(
-        `/api/projects/${projectId}/pdf?mainFile=${encodeURIComponent(
-          documentPath
-        )}&download=true`
-      ),
-      "_blank"
-    );
-  }
-
-  function handleDownloadZip() {
-    window.open(withShareToken(`/api/projects/${projectId}/download`), "_blank");
   }
 
   const projectSwitcher = shareToken ? (
@@ -419,77 +388,7 @@ export function EditorHeader({
         onFollowUser={onFollowUser}
       />
 
-      {/* Share button */}
-      {canManageShare && (
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setShareOpen(true)}
-                className="flex items-center gap-1.5 rounded-md border border-border bg-bg-tertiary px-2.5 py-1 text-xs text-text-secondary transition-colors hover:text-accent hover:border-accent/30 hover:bg-accent/5"
-              >
-                <Share2 className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">Share</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Share project</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
-
-      <div className="h-4 w-px bg-border shrink-0" />
-
-      {/* Download buttons */}
-      <TooltipProvider delayDuration={300}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={handleDownloadPdf}
-              disabled={!documentPath}
-              className="flex items-center gap-1.5 rounded-md border border-border bg-bg-tertiary px-2.5 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Download className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">PDF</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Download PDF</p>
-          </TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={handleDownloadZip}
-              className="flex items-center gap-1.5 rounded-md border border-border bg-bg-tertiary px-2.5 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary hover:bg-bg-elevated"
-            >
-              <FileArchive className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">ZIP</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Download source ZIP</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
     </AppHeader>
-
-    {/* Share Dialog */}
-    {canManageShare && (
-      <ShareDialog
-        projectId={projectId}
-        projectName={projectName}
-        open={shareOpen}
-        onClose={() => setShareOpen(false)}
-        isOwner={role === "owner"}
-        onChanged={onShareUpdated}
-      />
-    )}
     </>
   );
 }
