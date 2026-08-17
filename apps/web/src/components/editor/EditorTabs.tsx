@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { cn } from "@/lib/utils/cn";
-import { X } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -17,6 +17,8 @@ interface EditorTabsProps {
   dirtyFileIds?: Set<string>;
   onSelectTab: (fileId: string) => void;
   onCloseTab: (fileId: string) => void;
+  /** Optional AI Assistant tab, shown last and swapped in like a file tab */
+  aiTab?: { active: boolean; onSelect: () => void; onClose: () => void };
 }
 
 // ─── Helpers ────────────────────────────────────────
@@ -34,6 +36,7 @@ export function EditorTabs({
   dirtyFileIds,
   onSelectTab,
   onCloseTab,
+  aiTab,
 }: EditorTabsProps) {
   const handleMouseDown = useCallback(
     (e: React.MouseEvent, fileId: string) => {
@@ -46,7 +49,7 @@ export function EditorTabs({
     [onCloseTab]
   );
 
-  if (openFiles.length === 0) {
+  if (openFiles.length === 0 && !aiTab) {
     return (
       <div className="h-9 border-b border-border bg-bg-secondary" />
     );
@@ -55,7 +58,7 @@ export function EditorTabs({
   return (
     <div className="flex h-9 items-end overflow-x-auto border-b border-border bg-bg-secondary scrollbar-none">
       {openFiles.map((file) => {
-        const isActive = file.id === activeFileId;
+        const isActive = !aiTab?.active && file.id === activeFileId;
         const isDirty = dirtyFileIds?.has(file.id) ?? false;
         const filename = getFilename(file.path);
 
@@ -130,6 +133,48 @@ export function EditorTabs({
           </div>
         );
       })}
+
+      {aiTab && (
+        <div
+          className={cn(
+            "group relative flex h-full shrink-0 items-center gap-2 border-r border-border px-3 text-sm transition-colors cursor-pointer select-none",
+            aiTab.active
+              ? "bg-bg-primary text-text-primary"
+              : "bg-bg-secondary text-text-muted hover:text-text-secondary hover:bg-bg-elevated/50"
+          )}
+        >
+          {aiTab.active && (
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent" />
+          )}
+
+          <button
+            type="button"
+            onClick={aiTab.onSelect}
+            className="flex items-center gap-1.5 text-xs"
+            title="AI Assistant"
+          >
+            <Sparkles className="h-3 w-3 text-accent" />
+            AI Assistant
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              aiTab.onClose();
+            }}
+            aria-label="Close AI assistant"
+            className={cn(
+              "rounded p-0.5 transition-colors",
+              aiTab.active
+                ? "text-text-muted hover:text-text-primary hover:bg-bg-elevated"
+                : "text-transparent group-hover:text-text-muted hover:!text-text-primary hover:bg-bg-elevated"
+            )}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

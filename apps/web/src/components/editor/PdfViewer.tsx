@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from "react";
+import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle, type ReactNode } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -31,6 +31,8 @@ interface PdfViewerProps {
   pdfUrl: string | null;
   loading: boolean;
   onTextSelect?: (text: string, before: string, after: string) => void;
+  /** Extra actions appended to the end of the toolbar (Share, ZIP). */
+  toolbarExtra?: ReactNode;
 }
 
 export interface PdfViewerHandle {
@@ -46,7 +48,7 @@ const ZOOM_WHEEL_SENSITIVITY = 0.002;
 
 // ─── PdfViewer ──────────────────────────────────────
 
-export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function PdfViewer({ pdfUrl, loading, onTextSelect }, ref) {
+export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function PdfViewer({ pdfUrl, loading, onTextSelect, toolbarExtra }, ref) {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [zoom, setZoom] = useState<number>(1);
@@ -306,6 +308,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                       type="button"
                       onClick={handlePrevPage}
                       disabled={currentPage <= 1}
+                      aria-label="Previous page"
                       className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <ChevronUp className="h-3.5 w-3.5" />
@@ -324,6 +327,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                       type="button"
                       onClick={handleNextPage}
                       disabled={currentPage >= numPages}
+                      aria-label="Next page"
                       className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <ChevronDown className="h-3.5 w-3.5" />
@@ -342,6 +346,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                   type="button"
                   onClick={handleZoomOut}
                   disabled={zoom <= MIN_ZOOM}
+                  aria-label="Zoom out"
                   className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <ZoomOut className="h-3.5 w-3.5" />
@@ -355,6 +360,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                 <button
                   type="button"
                   onClick={handleZoomReset}
+                  aria-label="Reset zoom"
                   className="min-w-[40px] rounded px-1 py-0.5 text-center text-xs text-text-secondary tabular-nums transition-colors hover:text-text-primary hover:bg-bg-elevated"
                 >
                   {zoomPercent}%
@@ -369,6 +375,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                   type="button"
                   onClick={handleZoomIn}
                   disabled={zoom >= MAX_ZOOM}
+                  aria-label="Zoom in"
                   className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <ZoomIn className="h-3.5 w-3.5" />
@@ -385,6 +392,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                   type="button"
                   onClick={handleDownload}
                   disabled={!pdfUrl}
+                  aria-label="Download PDF"
                   className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Download className="h-3.5 w-3.5" />
@@ -392,6 +400,8 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               </TooltipTrigger>
               <TooltipContent>Download PDF</TooltipContent>
             </Tooltip>
+
+            {toolbarExtra}
           </div>
         </div>
 
