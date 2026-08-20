@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
 import {
   Panel,
@@ -173,6 +173,7 @@ export function EditorLayout({
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [activeFileContent, setActiveFileContent] = useState<string>("");
+  const [tabsRestored, setTabsRestored] = useState(false);
   // Normalize stale in-progress build statuses: if DB says queued/compiling,
   // the build may have finished or crashed while nobody was watching.
   const initialBuildStatus = (() => {
@@ -219,9 +220,6 @@ export function EditorLayout({
   // ─── AI Chat Panel State ──────────────────────────
 
   const canUseAi = canEdit && !shareToken;
-  // The AI assistant is a tab in the editor tab bar: `aiPanelOpen` means the tab
-  // exists, `aiTabActive` means it is the tab currently showing.
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiTabActive, setAiTabActive] = useState(false);
   const [aiPendingSelection, setAiPendingSelection] = useState<{
     fromLine: number;
@@ -293,6 +291,8 @@ export function EditorLayout({
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoOpenedMainRef = useRef(false);
+  const restoredTabStateRef = useRef(false);
+  const restoredTabsProjectRef = useRef<string | null>(null);
   const fileLoadRetriesRef = useRef<Map<string, number>>(new Map());
   const filesRef = useRef(initialFiles);
   filesRef.current = files;
@@ -953,6 +953,90 @@ export function EditorLayout({
     },
   });
 
+  // ─── Editor tab persistence ───────────────────────
+
+  useEffect(() => {
+    if (restoredTabsProjectRef.current === project.id) return;
+    restoredTabsProjectRef.current = project.id;
+    restoredTabStateRef.current = false;
+
+    try {
+      const raw = window.localStorage.getItem(`editor-tabs:${project.id}`);
+      if (raw) {
+        const stored = JSON.parse(raw) as {
+          openFileIds?: unknown;
+          activeFileId?: unknown;
+          activeDocumentId?: unknown;
+          aiTabActive?: unknown;
+        };
+        if (
+          !Array.isArray(stored.openFileIds) ||
+          !stored.openFileIds.every((id) => typeof id === "string")
+        ) {
+          throw new Error("Invalid saved editor tabs");
+        }
+
+        const availableFiles = new Map(
+          filesRef.current
+            .filter((file) => !file.isDirectory)
+            .map((file) => [file.id, file] as const)
+        );
+        const restoredFiles = stored.openFileIds.flatMap((id) => {
+          const file = availableFiles.get(id);
+          return file ? [{ id: file.id, path: file.path }] : [];
+        });
+        const restoredActiveId =
+          typeof stored.activeFileId === "string" &&
+          restoredFiles.some((file) => file.id === stored.activeFileId)
+            ? stored.activeFileId
+            : restoredFiles[restoredFiles.length - 1]?.id ?? null;
+        const restoredDocument =
+          typeof stored.activeDocumentId === "string"
+            ? availableFiles.get(stored.activeDocumentId)
+            : undefined;
+
+        setOpenFiles(restoredFiles);
+        activeFileIdRef.current = restoredActiveId;
+        setActiveFileId(restoredActiveId);
+        setAiTabActive(stored.aiTabActive === true);
+        if (restoredDocument?.isDocument) {
+          activeDocumentIdRef.current = restoredDocument.id;
+          activeDocumentPathRef.current = restoredDocument.path;
+          setActiveDocumentId(restoredDocument.id);
+        }
+        restoredTabStateRef.current = true;
+      }
+    } catch {
+      // Ignore stale browser state and use the normal first-visit default.
+    } finally {
+      setTabsRestored(true);
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    if (!tabsRestored) return;
+    try {
+      window.localStorage.setItem(
+        `editor-tabs:${project.id}`,
+        JSON.stringify({
+          openFileIds: openFiles.map((file) => file.id),
+          activeFileId,
+          activeDocumentId,
+          aiTabActive,
+        })
+      );
+    } catch {
+      // Browser storage is optional; editing still works without it.
+    }
+  }, [
+    activeDocumentId,
+    activeFileId,
+    aiTabActive,
+    openFiles,
+    project.id,
+    tabsRestored,
+  ]);
+
   // ─── File content loading ─────────────────────────
 
   useEffect(() => {
@@ -1231,21 +1315,42 @@ export function EditorLayout({
   const handleAskAi = useCallback(
     (selection: { fromLine: number; toLine: number; text: string }) => {
       setAiPendingSelection(selection);
-      setAiPanelOpen(true);
       setAiTabActive(true);
     },
     []
   );
 
   /**
-   * Editor buffer for the active file, or undefined while it is still loading
-   * so the server falls back to disk instead of rewriting the file from "".
+   * Live buffer when the file is open, else the last fetched copy.
+   * Undefined means the server should read disk instead of trusting "".
    */
-  const getAiFileContent = useCallback(() => {
-    const activeId = activeFileIdRef.current;
-    if (!activeId) return undefined;
-    return fileContentsRef.current.get(activeId);
+  const getAiFileContent = useCallback((fileId: string) => {
+    return fileContentsRef.current.get(fileId);
   }, []);
+
+  const texFiles = useMemo(
+    () =>
+      files
+        .filter(
+          (file) =>
+            !file.isDirectory && file.path.toLowerCase().endsWith(".tex")
+        )
+        .map((file) => ({ id: file.id, path: file.path })),
+    [files]
+  );
+
+  const texAnchor = useMemo(() => {
+    const active = texFiles.find((file) => file.id === activeFileId);
+    if (active) return active;
+    const openTex = [...openFiles]
+      .reverse()
+      .map((open) => texFiles.find((file) => file.id === open.id))
+      .find((file) => Boolean(file));
+    if (openTex) return openTex;
+    const main = texFiles.find((file) => file.path === mainFilePath);
+    if (main) return main;
+    return texFiles[0] ?? null;
+  }, [activeFileId, mainFilePath, openFiles, texFiles]);
 
   const handleAiEditsApplied = useCallback(
     (touchedPaths: string[]) => {
@@ -1267,15 +1372,8 @@ export function EditorLayout({
           next.delete(touched.id);
           return next;
         });
+        fetchFileContent(touched.id);
       });
-
-      const activeId = activeFileIdRef.current;
-      if (activeId) {
-        const activePath = filesRef.current.find((f) => f.id === activeId)?.path;
-        if (activePath && touchedPaths.includes(activePath)) {
-          fetchFileContent(activeId);
-        }
-      }
 
       if (!autoCompileEnabledRef.current) return;
       if (compilingRef.current) {
@@ -1654,8 +1752,9 @@ export function EditorLayout({
     refreshShareState();
   }, [refreshShareState]);
 
-  // Auto-open main tex file once files are available
+  // Auto-open the main file only when this browser has no saved tab state.
   useEffect(() => {
+    if (!tabsRestored || restoredTabStateRef.current) return;
     if (autoOpenedMainRef.current) return;
     if (activeFileId || openFiles.length > 0) {
       autoOpenedMainRef.current = true;
@@ -1679,7 +1778,15 @@ export function EditorLayout({
       autoOpenedMainRef.current = true;
       handleFileSelect(fallbackTex.id, fallbackTex.path);
     }
-  }, [activeDocumentId, activeFileId, files, handleFileSelect, openFiles.length, project.mainFile]);
+  }, [
+    activeDocumentId,
+    activeFileId,
+    files,
+    handleFileSelect,
+    openFiles.length,
+    project.mainFile,
+    tabsRestored,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1718,19 +1825,6 @@ export function EditorLayout({
         isSharedProject={isSharedProject}
         shareToken={shareToken}
         canEdit={canEdit}
-        aiPanelOpen={aiPanelOpen && aiTabActive}
-        onToggleAiPanel={
-          canUseAi
-            ? () => {
-                if (aiPanelOpen && aiTabActive) {
-                  setAiTabActive(false);
-                  return;
-                }
-                setAiPanelOpen(true);
-                setAiTabActive(true);
-              }
-            : undefined
-        }
       />
 
       {/* Main content area */}
@@ -1788,15 +1882,10 @@ export function EditorLayout({
                     }}
                     onCloseTab={handleCloseTab}
                     aiTab={
-                      canUseAi && aiPanelOpen
+                      canUseAi
                         ? {
                             active: aiTabActive,
                             onSelect: () => setAiTabActive(true),
-                            onClose: () => {
-                              setAiPanelOpen(false);
-                              setAiTabActive(false);
-                              setAiPendingSelection(null);
-                            },
                           }
                         : undefined
                     }
@@ -1854,24 +1943,14 @@ export function EditorLayout({
 
                   {/* AI chat — mounted while its tab exists so switching
                       tabs does not throw away the conversation */}
-                  {canUseAi && aiPanelOpen && (
+                  {canUseAi && (
                     <div className={cn("flex-1 min-h-0", !aiTabActive && "hidden")}>
                       <AiChatPanel
                         projectId={project.id}
-                        activeFile={
-                          activeFileId && !isImageFile(activeFileId)
-                            ? {
-                                id: activeFileId,
-                                path:
-                                  openFiles.find((f) => f.id === activeFileId)
-                                    ?.path ??
-                                  files.find((f) => f.id === activeFileId)
-                                    ?.path ??
-                                  "",
-                              }
-                            : null
-                        }
+                        files={texFiles}
+                        anchorFile={texAnchor}
                         getFileContent={getAiFileContent}
+                        ensureFileContent={fetchFileContent}
                         pendingSelection={aiPendingSelection}
                         onClearSelection={() => setAiPendingSelection(null)}
                         onEditsApplied={handleAiEditsApplied}

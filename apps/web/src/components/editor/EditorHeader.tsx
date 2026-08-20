@@ -12,7 +12,6 @@ import {
   Check,
   Ban,
   Circle,
-  Sparkles,
 } from "lucide-react";
 import {
   Tooltip,
@@ -58,8 +57,6 @@ interface EditorHeaderProps {
   isSharedProject?: boolean;
   shareToken?: string | null;
   canEdit?: boolean;
-  aiPanelOpen?: boolean;
-  onToggleAiPanel?: () => void;
 }
 
 // ─── Build status ──────────────────────────────────
@@ -171,8 +168,6 @@ export function EditorHeader({
   isSharedProject = false,
   shareToken = null,
   canEdit = true,
-  aiPanelOpen = false,
-  onToggleAiPanel,
 }: EditorHeaderProps) {
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [sharedProjects, setSharedProjects] = useState<ProjectListItem[]>([]);
@@ -381,35 +376,6 @@ export function EditorHeader({
         )}
 
         <BuildStatusBadge status={buildStatus} />
-
-        {onToggleAiPanel && (
-          <>
-            <div className="mx-0.5 h-4 w-px shrink-0 bg-border-subtle" />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onToggleAiPanel}
-                  aria-pressed={aiPanelOpen}
-                  className={cn(
-                    "btn h-7 border px-2.5 text-xs",
-                    aiPanelOpen
-                      ? "border-accent-muted bg-accent-subtle text-accent"
-                      : "border-border bg-bg-inset text-text-secondary hover:border-border-strong hover:text-text-primary"
-                  )}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">AI</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {aiPanelOpen ? "Hide AI assistant" : "Ask AI about this document"}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </>
-        )}
       </TooltipProvider>
 
       {/* Access context, then who else is in the room */}

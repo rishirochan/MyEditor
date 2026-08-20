@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Sparkles, Send, X, Loader2, Undo2, Trash2 } from "lucide-react";
 
+const MAX_CONTEXT_FILES = 2;
+
 interface AiEdit {
   filePath: string;
   oldText: string;
@@ -26,6 +28,7 @@ interface AiMessage {
   appliedEdits?: AiEdit[];
   skippedEdits?: SkippedAiEdit[];
   selectionLabel?: string;
+  contextLabel?: string;
   canUndo?: boolean;
   undoing?: boolean;
   undone?: boolean;
@@ -55,10 +58,17 @@ type ChatEvent =
   | { type: "result" } & ChatResult
   | { type: "error"; message: string };
 
+interface ContextFile {
+  id: string;
+  path: string;
+}
+
 interface AiChatPanelProps {
   projectId: string;
-  activeFile: { id: string; path: string } | null;
-  getFileContent: () => string | undefined;
+  files: ContextFile[];
+  anchorFile: ContextFile | null;
+  getFileContent: (fileId: string) => string | undefined;
+  ensureFileContent: (fileId: string) => void;
   pendingSelection: AiSelection | null;
   onClearSelection: () => void;
   onEditsApplied: (touchedPaths: string[]) => void;
@@ -188,79 +198,182 @@ function historyContent(message: AiMessage) {
   return `${message.content.slice(0, Math.max(0, 8000 - metadata.length))}${metadata}`;
 }
 
-function loadThreads(storageKey: string): Map<string, AiMessage[]> {
+function parentDir(filePath: string): string {
+  const index = filePath.lastIndexOf("/");
+  return index === -1 ? "" : filePath.slice(0, index);
+}
+
+function fileName(filePath: string): string {
+  return filePath.split("/").pop() ?? filePath;
+}
+
+function EditDiff({ edit }: { edit: AiEdit }) {
+  return (
+    <details
+      open
+      className="overflow-hidden rounded-md border border-border-subtle bg-bg-inset"
+    >
+      <summary
+        className="cursor-pointer border-b border-border-subtle px-2 py-1 pr-10 font-mono text-[10px] text-text-muted hover:text-text-secondary"
+        data-numeric
+      >
+        {edit.filePath}:{edit.line}
+      </summary>
+      <div
+        className="max-h-56 overflow-auto font-mono text-[10px] leading-4"
+        aria-label={`Changes to ${edit.filePath} at line ${edit.line}`}
+      >
+        {edit.oldText.split("\n").map((line, index) => (
+          <div
+            key={`old-${index}`}
+            className="grid min-w-max grid-cols-[3ch_2ch_1fr] bg-error-subtle text-error"
+          >
+            <span className="select-none text-right opacity-60" data-numeric>
+              {edit.line + index}
+            </span>
+            <span className="select-none text-center">−</span>
+            <span className="pr-2 whitespace-pre">{line || " "}</span>
+          </div>
+        ))}
+        {(edit.newText ? edit.newText.split("\n") : []).map((line, index) => (
+          <div
+            key={`new-${index}`}
+            className="grid min-w-max grid-cols-[3ch_2ch_1fr] bg-success-subtle text-success"
+          >
+            <span className="select-none text-right opacity-60" data-numeric>
+              {edit.line + index}
+            </span>
+            <span className="select-none text-center">+</span>
+            <span className="pr-2 whitespace-pre">{line || " "}</span>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function sanitizeMessages(messages: AiMessage[]): AiMessage[] {
+  return messages.map((message) => ({ ...message, undoing: false }));
+}
+
+function loadMessages(projectId: string): AiMessage[] {
   try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return new Map();
-    const stored: Record<string, AiMessage[]> = JSON.parse(raw);
-    return new Map(
-      Object.entries(stored).map(([fileId, messages]) => [
-        fileId,
-        // A reload cancels any in-flight undo, so never restore it as pending.
-        messages.map((message) => ({ ...message, undoing: false })),
-      ])
+    const v2 = window.localStorage.getItem(`ai-chat-v2:${projectId}`);
+    if (v2) {
+      const parsed: unknown = JSON.parse(v2);
+      if (Array.isArray(parsed)) return sanitizeMessages(parsed as AiMessage[]);
+    }
+
+    const v1 = window.localStorage.getItem(`ai-chat:${projectId}`);
+    if (!v1) return [];
+    const stored: Record<string, AiMessage[]> = JSON.parse(v1);
+    const longest = Object.values(stored).reduce<AiMessage[]>(
+      (best, thread) => (thread.length > best.length ? thread : best),
+      []
     );
+    return sanitizeMessages(longest);
   } catch {
-    return new Map();
+    return [];
   }
 }
 
 export function AiChatPanel({
   projectId,
-  activeFile,
+  files,
+  anchorFile,
   getFileContent,
+  ensureFileContent,
   pendingSelection,
   onClearSelection,
   onEditsApplied,
 }: AiChatPanelProps) {
-  // ponytail: per-file threads live in localStorage; move to the DB if they need to
-  // follow the user across browsers.
-  const [threads, setThreads] = useState<Map<string, AiMessage[]>>(new Map());
+  const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState("");
-  const [sendingFileId, setSendingFileId] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [activity, setActivity] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [manualContext, setManualContext] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageIdRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const loadedKeyRef = useRef<string | null>(null);
-  const storageKey = `ai-chat:${projectId}`;
+  const storageKey = `ai-chat-v2:${projectId}`;
 
-  // Load once per project (after mount, so SSR markup still matches), then persist
-  // every change so a reload or hot update keeps the conversation.
   useEffect(() => {
     if (loadedKeyRef.current !== storageKey) {
       loadedKeyRef.current = storageKey;
-      const loaded = loadThreads(storageKey);
+      const loaded = loadMessages(projectId);
       messageIdRef.current = Math.max(
         0,
-        ...[...loaded.values()].flatMap((messages) =>
-          messages.map((message) => Number(message.id) || 0)
-        )
+        ...loaded.map((message) => Number(message.id) || 0)
       );
-      setThreads(loaded);
+      setMessages(loaded);
       return;
     }
     try {
-      window.localStorage.setItem(
-        storageKey,
-        JSON.stringify(Object.fromEntries(threads))
-      );
+      window.localStorage.setItem(storageKey, JSON.stringify(messages));
     } catch {
       // ponytail: out of quota — drop persistence rather than break the chat.
     }
-  }, [threads, storageKey]);
+  }, [messages, projectId, storageKey]);
 
-  // Grow the composer to fit its content instead of scrolling.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    el.style.height = `${Math.max(el.scrollHeight, 36)}px`;
   }, [input]);
 
-  const sending = sendingFileId !== null;
-  const thinking = activeFile !== null && sendingFileId === activeFile.id;
-  const messages = activeFile ? threads.get(activeFile.id) ?? [] : [];
+  useEffect(() => {
+    if (manualContext) {
+      setSelectedIds((previous) => {
+        const next = previous.filter((id) =>
+          files.some((file) => file.id === id)
+        );
+        return next.length === previous.length ? previous : next;
+      });
+      return;
+    }
+    const next = anchorFile ? [anchorFile.id] : [];
+    setSelectedIds((previous) =>
+      previous.length === next.length &&
+      previous.every((id, index) => id === next[index])
+        ? previous
+        : next
+    );
+  }, [anchorFile, files, manualContext]);
+
+  useEffect(() => {
+    if (!pendingSelection || !anchorFile) return;
+    const folder = parentDir(anchorFile.path);
+    setManualContext(true);
+    setSelectedIds((previous) => {
+      const sameFolder = previous.filter((id) => {
+        const file = files.find((entry) => entry.id === id);
+        return file ? parentDir(file.path) === folder : false;
+      });
+      const next = sameFolder.includes(anchorFile.id)
+        ? sameFolder
+        : [anchorFile.id, ...sameFolder].slice(0, MAX_CONTEXT_FILES);
+      return next.length === previous.length &&
+        next.every((id, index) => id === previous[index])
+        ? previous
+        : next;
+    });
+  }, [anchorFile, files, pendingSelection]);
+
+  const folderPath = parentDir(
+    files.find((file) => selectedIds.includes(file.id))?.path ??
+      anchorFile?.path ??
+      ""
+  );
+  const folderFiles = files
+    .filter((file) => parentDir(file.path) === folderPath)
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const selectedFiles = folderFiles.filter((file) =>
+    selectedIds.includes(file.id)
+  );
+  const hasContext = selectedFiles.length > 0;
   const lastUndoableMessageId = messages.reduce<string | undefined>(
     (lastId, message) =>
       message.role === "assistant" &&
@@ -273,54 +386,57 @@ export function AiChatPanel({
   );
 
   useEffect(() => {
+    for (const id of selectedIds) {
+      if (getFileContent(id) === undefined) ensureFileContent(id);
+    }
+  }, [ensureFileContent, getFileContent, selectedIds]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, thinking, activity.length]);
+  }, [messages.length, sending, activity.length]);
 
   function nextMessageId() {
     messageIdRef.current += 1;
     return String(messageIdRef.current);
   }
 
-  function appendMessage(fileId: string, message: AiMessage) {
-    setThreads((previous) => {
-      const next = new Map(previous);
-      next.set(fileId, [...(next.get(fileId) ?? []), message]);
-      return next;
+  function filesPayload(targetFiles: ContextFile[]) {
+    return targetFiles.map((file) => {
+      const content = getFileContent(file.id);
+      return content === undefined
+        ? { path: file.path }
+        : { path: file.path, content };
     });
   }
 
-  function updateMessage(
-    fileId: string,
-    messageId: string,
-    update: Partial<AiMessage>
-  ) {
-    setThreads((previous) => {
-      const next = new Map(previous);
-      next.set(
-        fileId,
-        (next.get(fileId) ?? []).map((message) =>
-          message.id === messageId ? { ...message, ...update } : message
-        )
-      );
-      return next;
+  function toggleFile(fileId: string) {
+    setManualContext(true);
+    setSelectedIds((previous) => {
+      if (previous.includes(fileId)) {
+        return previous.filter((id) => id !== fileId);
+      }
+      if (previous.length >= MAX_CONTEXT_FILES) return previous;
+      return [...previous, fileId];
     });
   }
 
   function applyResult(
-    fileId: string,
     result: ChatResult,
     completedActivity: string[],
     canUndo = true
   ) {
-    appendMessage(fileId, {
-      id: nextMessageId(),
-      role: "assistant",
-      content: result.reply,
-      activity: completedActivity,
-      appliedEdits: result.appliedEdits,
-      skippedEdits: result.skippedEdits,
-      canUndo,
-    });
+    setMessages((previous) => [
+      ...previous,
+      {
+        id: nextMessageId(),
+        role: "assistant",
+        content: result.reply,
+        activity: completedActivity,
+        appliedEdits: result.appliedEdits,
+        skippedEdits: result.skippedEdits,
+        canUndo,
+      },
+    ]);
 
     const touchedPaths = [
       ...new Set(result.appliedEdits.map((edit) => edit.filePath)),
@@ -328,28 +444,36 @@ export function AiChatPanel({
     if (touchedPaths.length > 0) onEditsApplied(touchedPaths);
   }
 
-  async function handleUndo(fileId: string, message: AiMessage) {
-    if (
-      !activeFile ||
-      !message.appliedEdits?.length ||
-      message.undoing ||
-      sending
-    ) {
-      return;
-    }
+  async function handleUndo(message: AiMessage) {
+    if (!message.appliedEdits?.length || message.undoing || sending) return;
 
-    updateMessage(fileId, message.id, { undoing: true, undoError: undefined });
-    setSendingFileId(fileId);
+    const undoFiles = [
+      ...new Map(
+        message.appliedEdits.map((edit) => {
+          const file = files.find((entry) => entry.path === edit.filePath);
+          return [edit.filePath, file] as const;
+        })
+      ).values(),
+    ].filter((file): file is ContextFile => Boolean(file));
+
+    if (undoFiles.length === 0) return;
+
+    setMessages((previous) =>
+      previous.map((entry) =>
+        entry.id === message.id
+          ? { ...entry, undoing: true, undoError: undefined }
+          : entry
+      )
+    );
+    setSending(true);
     setActivity([]);
     try {
-      const fileContent = getFileContent();
       const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
-          filePath: activeFile.path,
-          ...(fileContent !== undefined ? { fileContent } : {}),
+          files: filesPayload(undoFiles),
           undoEdits: [...message.appliedEdits].reverse().map((edit) => ({
             filePath: edit.filePath,
             oldText: edit.newText,
@@ -361,60 +485,82 @@ export function AiChatPanel({
       const chatResponse = await readChatResponse(response, setActivity);
 
       if (!response.ok || chatResponse.errorMessage || !chatResponse.result) {
-        updateMessage(fileId, message.id, {
-          undoing: false,
-          undoError:
-            chatResponse.errorMessage ?? "Undo failed. Please try again.",
-        });
-        appendMessage(fileId, {
-          id: nextMessageId(),
-          role: "assistant",
-          content:
-            chatResponse.errorMessage ?? "Undo failed. Please try again.",
-          error: true,
-          activity: chatResponse.activity,
-        });
+        setMessages((previous) => [
+          ...previous.map((entry) =>
+            entry.id === message.id
+              ? {
+                  ...entry,
+                  undoing: false,
+                  undoError:
+                    chatResponse.errorMessage ??
+                    "Undo failed. Please try again.",
+                }
+              : entry
+          ),
+          {
+            id: nextMessageId(),
+            role: "assistant",
+            content:
+              chatResponse.errorMessage ?? "Undo failed. Please try again.",
+            error: true,
+            activity: chatResponse.activity,
+          },
+        ]);
         return;
       }
 
-      applyResult(fileId, chatResponse.result, chatResponse.activity, false);
+      applyResult(chatResponse.result, chatResponse.activity, false);
       const fullyUndone =
         chatResponse.result.appliedEdits.length === message.appliedEdits.length;
-      updateMessage(fileId, message.id, {
-        undoing: false,
-        undone: fullyUndone,
-        undoError: fullyUndone
-          ? undefined
-          : "Undo was only partially applied. See details below.",
-      });
+      setMessages((previous) =>
+        previous.map((entry) =>
+          entry.id === message.id
+            ? {
+                ...entry,
+                undoing: false,
+                undone: fullyUndone,
+                undoError: fullyUndone
+                  ? undefined
+                  : "Undo was only partially applied. See details below.",
+              }
+            : entry
+        )
+      );
     } catch {
-      updateMessage(fileId, message.id, {
-        undoing: false,
-        undoError: "Undo failed. Please try again.",
-      });
+      setMessages((previous) =>
+        previous.map((entry) =>
+          entry.id === message.id
+            ? {
+                ...entry,
+                undoing: false,
+                undoError: "Undo failed. Please try again.",
+              }
+            : entry
+        )
+      );
     } finally {
       setActivity([]);
-      setSendingFileId(null);
+      setSending(false);
     }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = input.trim();
-    if (!trimmed || !activeFile || sending) return;
+    if (!trimmed || !hasContext || sending) return;
 
-    const fileId = activeFile.id;
-    const filePath = activeFile.path;
     const selection = pendingSelection;
+    const contextLabel = selectedFiles.map((file) => file.path).join(", ");
     const userMessage: AiMessage = {
       id: nextMessageId(),
       role: "user",
       content: trimmed,
+      contextLabel,
       selectionLabel: selection
         ? `Re: lines ${selection.fromLine}–${selection.toLine}`
         : undefined,
     };
-    const history = [...(threads.get(fileId) ?? []), userMessage]
+    const history = [...messages, userMessage]
       .filter((message) => !message.error)
       .slice(-30)
       .map((message) => ({
@@ -422,21 +568,19 @@ export function AiChatPanel({
         content: historyContent(message),
       }));
 
-    appendMessage(fileId, userMessage);
+    setMessages((previous) => [...previous, userMessage]);
     setInput("");
     if (selection) onClearSelection();
-    setSendingFileId(fileId);
+    setSending(true);
     setActivity([]);
 
     try {
-      const fileContent = getFileContent();
       const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
-          filePath,
-          ...(fileContent !== undefined ? { fileContent } : {}),
+          files: filesPayload(selectedFiles),
           messages: history,
           ...(selection ? { selection } : {}),
         }),
@@ -444,75 +588,118 @@ export function AiChatPanel({
       const chatResponse = await readChatResponse(response, setActivity);
 
       if (!response.ok || chatResponse.errorMessage || !chatResponse.result) {
-        appendMessage(fileId, {
-          id: nextMessageId(),
-          role: "assistant",
-          content:
-            chatResponse.errorMessage ??
-            "AI request failed. Please try again.",
-          error: true,
-          activity: chatResponse.activity,
-        });
+        setMessages((previous) => [
+          ...previous,
+          {
+            id: nextMessageId(),
+            role: "assistant",
+            content:
+              chatResponse.errorMessage ??
+              "AI request failed. Please try again.",
+            error: true,
+            activity: chatResponse.activity,
+          },
+        ]);
         return;
       }
 
-      applyResult(fileId, chatResponse.result, chatResponse.activity);
+      applyResult(chatResponse.result, chatResponse.activity);
     } catch {
-      appendMessage(fileId, {
-        id: nextMessageId(),
-        role: "assistant",
-        content: "Network error. Please try again.",
-        error: true,
-        activity,
-      });
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: nextMessageId(),
+          role: "assistant",
+          content: "Network error. Please try again.",
+          error: true,
+          activity,
+        },
+      ]);
     } finally {
       setActivity([]);
-      setSendingFileId(null);
+      setSending(false);
     }
   }
 
+  const folderLabel = folderPath ? `${folderPath}/` : "project root";
+
   return (
     <div className="flex h-full flex-col bg-bg-secondary">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-        <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-muted">
-          {activeFile ? activeFile.path : "No file open"}
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            if (!activeFile || messages.length === 0) return;
-            if (!window.confirm("Clear this chat?")) return;
-            // /api/ai/chat is stateless and rebuilds context from client messages,
-            // so dropping the thread resets the assistant memory.
-            setThreads((previous) => {
-              const next = new Map(previous);
-              next.delete(activeFile.id);
-              return next;
-            });
-            setActivity([]);
-          }}
-          disabled={!activeFile || sending || messages.length === 0}
-          aria-label="Clear chat"
-          title="Clear chat"
-          className="rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+      <div className="shrink-0 border-b border-border">
+        <div className="flex h-9 items-center gap-2 px-3">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-muted">
+            {folderLabel}
+          </span>
+          <span className="shrink-0 font-mono text-[10px] text-text-muted" data-numeric>
+            {selectedFiles.length}/{MAX_CONTEXT_FILES}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (messages.length === 0) return;
+              if (!window.confirm("Clear this chat?")) return;
+              setMessages([]);
+              setActivity([]);
+            }}
+            disabled={sending || messages.length === 0}
+            aria-label="Clear chat"
+            title="Clear chat"
+            className="rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className="flex gap-1 overflow-x-auto px-3 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {folderFiles.length === 0 ? (
+            <p className="py-0.5 text-[11px] text-text-muted">
+              No .tex files in this folder.
+            </p>
+          ) : (
+            folderFiles.map((file) => {
+              const selected = selectedIds.includes(file.id);
+              const atLimit =
+                !selected && selectedFiles.length >= MAX_CONTEXT_FILES;
+              return (
+                <button
+                  key={file.id}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={atLimit}
+                  title={
+                    atLimit
+                      ? `Deselect a file first (${MAX_CONTEXT_FILES} max)`
+                      : file.path
+                  }
+                  onClick={() => toggleFile(file.id)}
+                  className={cn(
+                    "shrink-0 rounded-md border px-2 py-0.5 font-mono text-[11px]",
+                    "transition-colors duration-150 ease-out",
+                    selected
+                      ? "border-accent-muted bg-accent-subtle text-accent"
+                      : "border-border bg-bg-inset text-text-secondary hover:border-border-strong hover:text-text-primary",
+                    atLimit && "cursor-not-allowed opacity-40"
+                  )}
+                >
+                  {fileName(file.path)}
+                </button>
+              );
+            })
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
-        {!activeFile ? (
+        {!hasContext ? (
           <div className="flex h-full items-center justify-center">
             <p className="px-4 text-center text-xs text-text-muted">
-              No file open. Open a file to chat about it.
+              Select up to two .tex files for context.
             </p>
           </div>
-        ) : messages.length === 0 && !thinking ? (
+        ) : messages.length === 0 && !sending ? (
           <div className="flex h-full items-center justify-center">
             <p className="px-4 text-center text-xs text-text-muted">
-              Ask about this document. I can edit it directly. Select lines in
-              the editor to focus my attention.
+              Ask about the selected files. I can edit them directly.
             </p>
           </div>
         ) : (
@@ -534,6 +721,11 @@ export function AiChatPanel({
                       : "max-w-[95%] bg-bg-elevated text-text-secondary"
                 )}
               >
+                {message.contextLabel && (
+                  <p className="mb-1 font-mono text-[10px] text-text-muted">
+                    {message.contextLabel}
+                  </p>
+                )}
                 {message.selectionLabel && (
                   <p className="mb-1 font-mono text-[10px] font-medium text-accent">
                     {message.selectionLabel}
@@ -556,30 +748,32 @@ export function AiChatPanel({
                   </details>
                 ) : null}
                 {message.appliedEdits?.length ? (
-                  <div className="mt-1.5 border-t border-border-subtle pt-1 text-[10px]">
-                    <p className="font-medium text-accent">
-                      Applied {message.appliedEdits.length} edit
-                      {message.appliedEdits.length === 1 ? "" : "s"}
-                    </p>
-                    <ul className="mt-0.5 space-y-0.5 font-mono text-text-muted">
-                      {message.appliedEdits.map((edit, index) => (
-                        <li key={`${edit.filePath}-${edit.line}-${index}`} data-numeric>
-                          {edit.filePath}:{edit.line}
-                        </li>
-                      ))}
-                    </ul>
+                  <div className="relative mt-1.5 space-y-1.5 border-t border-border-subtle pt-1.5 text-[10px]">
+                    {message.appliedEdits.map((edit, index) => (
+                      <EditDiff
+                        key={`${edit.filePath}-${edit.line}-${index}`}
+                        edit={edit}
+                      />
+                    ))}
                     {message.id === lastUndoableMessageId && !message.undone ? (
                       <button
                         type="button"
-                        onClick={() => handleUndo(activeFile.id, message)}
+                        onClick={() => handleUndo(message)}
                         disabled={sending || message.undoing}
-                        className="mt-1 inline-flex items-center gap-1 font-medium text-accent transition-colors duration-150 ease-out hover:text-accent-hover disabled:opacity-50"
+                        aria-label={message.undoing ? "Undoing edit" : "Undo edit"}
+                        title={message.undoing ? "Undoing edit" : "Undo edit"}
+                        className="btn btn-ghost absolute top-2 right-1 h-6 w-6 p-0"
                       >
-                        <Undo2 className="h-3 w-3" />
-                        {message.undoing ? "Undoing..." : "Undo"}
+                        {message.undoing ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Undo2 className="h-3.5 w-3.5" />
+                        )}
                       </button>
                     ) : message.undone ? (
-                      <p className="mt-1 text-text-muted">Undone</p>
+                      <p className="absolute top-2 right-2 text-text-muted">
+                        Undone
+                      </p>
                     ) : null}
                     {message.undoError && (
                       <p className="mt-1 text-error">{message.undoError}</p>
@@ -593,7 +787,9 @@ export function AiChatPanel({
                   >
                     {message.skippedEdits.map((edit, index) => (
                       <li key={`${edit.filePath}-${index}`}>
-                        Not applied: <span className="font-mono">{edit.filePath}</span>. {edit.reason}
+                        Not applied:{" "}
+                        <span className="font-mono">{edit.filePath}</span>.{" "}
+                        {edit.reason}
                       </li>
                     ))}
                   </ul>
@@ -609,30 +805,27 @@ export function AiChatPanel({
             role="status"
             aria-live="polite"
           >
-            {thinking ? (
-              <div className="animate-fade-in rounded-lg bg-bg-elevated px-2.5 py-1.5">
-                <div className="flex items-center gap-1.5 font-medium text-text-secondary">
-                  <Loader2 className="h-3 w-3 animate-spin text-accent" />
-                  Working
-                </div>
-                <ul className="mt-1 space-y-0.5 pl-3 font-mono">
-                  {(activity.length ? activity : ["Starting request..."]).map(
-                    (item, index, all) => (
-                      <li
-                        key={`${item}-${index}`}
-                        className={cn(
-                          index === all.length - 1 && "animate-pulse-soft text-text-secondary"
-                        )}
-                      >
-                        {item}
-                      </li>
-                    )
-                  )}
-                </ul>
+            <div className="animate-fade-in rounded-lg bg-bg-elevated px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5 font-medium text-text-secondary">
+                <Loader2 className="h-3 w-3 animate-spin text-accent" />
+                Working
               </div>
-            ) : (
-              "Waiting on a reply for another file"
-            )}
+              <ul className="mt-1 space-y-0.5 pl-3 font-mono">
+                {(activity.length ? activity : ["Starting request..."]).map(
+                  (item, index, all) => (
+                    <li
+                      key={`${item}-${index}`}
+                      className={cn(
+                        index === all.length - 1 &&
+                          "animate-pulse-soft text-text-secondary"
+                      )}
+                    >
+                      {item}
+                    </li>
+                  )
+                )}
+              </ul>
+            </div>
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -642,7 +835,10 @@ export function AiChatPanel({
         <div className="shrink-0 border-t border-border px-3 pt-2">
           <div className="flex items-start gap-2 rounded-md border border-accent-muted bg-accent-subtle px-2 py-1.5">
             <div className="min-w-0 flex-1">
-              <p className="font-mono text-[10px] font-medium text-accent" data-numeric>
+              <p
+                className="font-mono text-[10px] font-medium text-accent"
+                data-numeric
+              >
                 Lines {pendingSelection.fromLine}–{pendingSelection.toLine}
               </p>
               <p className="truncate font-mono text-[11px] text-text-secondary">
@@ -665,7 +861,7 @@ export function AiChatPanel({
       <form
         onSubmit={handleSubmit}
         className={cn(
-          "flex shrink-0 items-end gap-2 px-3 py-2",
+          "flex shrink-0 items-end gap-2 px-3 py-2.5",
           !pendingSelection && "border-t border-border"
         )}
       >
@@ -681,18 +877,18 @@ export function AiChatPanel({
             }
           }}
           maxLength={8000}
-          disabled={sending || !activeFile}
+          disabled={sending || !hasContext}
           placeholder={
-            activeFile ? "Ask about this document..." : "Open a file to chat"
+            hasContext ? "Ask about the selected files..." : "Select a file first"
           }
-          className="input flex-1 resize-none overflow-hidden px-2.5 py-1.5 text-xs"
+          className="input min-h-9 flex-1 resize-none overflow-y-auto px-3 py-2 text-xs leading-5"
         />
         <button
           type="submit"
-          disabled={!input.trim() || sending || !activeFile}
+          disabled={!input.trim() || sending || !hasContext}
           aria-label="Send message"
           title="Send (Enter)"
-          className="btn btn-primary shrink-0 rounded-md p-1.5"
+          className="btn btn-primary h-9 w-9 shrink-0 rounded-lg p-0"
         >
           {sending ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

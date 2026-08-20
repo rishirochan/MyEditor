@@ -26,11 +26,15 @@ const undoEditSchema = aiTextEditSchema.extend({
   startIndex: z.number().int().min(0),
 });
 
+const contextFileSchema = z.object({
+  path: z.string().trim().min(1).max(1000),
+  content: z.string().max(MAX_AI_FILE_CHARS).optional(),
+});
+
 const requestSchema = z
   .object({
     projectId: z.string().uuid(),
-    filePath: z.string().trim().min(1).max(1000),
-    fileContent: z.string().max(MAX_AI_FILE_CHARS).optional(),
+    files: z.array(contextFileSchema).min(1).max(2),
     messages: z
       .array(
         z.object({
@@ -65,8 +69,8 @@ const systemPrompt = [
   "{ reply: string, edits: [{ filePath: string, oldText: string, newText: string }] }",
   "Rules:",
   "1) edits are optional: return an empty array when the user just asks a question.",
-  "2) filePath must exactly equal activeFile.path. You can edit only the active file.",
-  "3) oldText must be copied verbatim from activeFile.content, including whitespace.",
+  "2) filePath must exactly equal one of contextFiles[].path. You can edit only those files.",
+  "3) oldText must be copied verbatim from that file's content, including whitespace.",
   "4) oldText must identify exactly one location. Include nearby source context when the short text repeats.",
   "5) newText is the complete replacement for oldText. Keep edits minimal and focused.",
   "6) When a selection is provided, prefer editing that exact selected text.",
@@ -135,20 +139,23 @@ function streamResponse(
 async function applyRequestedEdits(params: {
   request: NextRequest;
   projectId: string;
-  file: { id: string; path: string };
-  content: string;
+  files: Array<{ id: string; path: string; content: string }>;
   edits: Array<AiTextEdit & { startIndex?: number }>;
   emit: (event: StreamEvent) => void;
 }): Promise<{ applied: AppliedEdit[]; skipped: SkippedEdit[] }> {
-  const { request, projectId, file, edits, emit } = params;
+  const { request, projectId, files, edits, emit } = params;
+  const buffers = new Map(files.map((file) => [file.path, { ...file }]));
   const applied: AppliedEdit[] = [];
   const skipped: SkippedEdit[] = [];
-  let content = params.content;
 
   for (const edit of edits) {
     const filePath = normalizeFilePath(edit.filePath);
-    if (filePath !== file.path) {
-      skipped.push({ filePath, reason: "Only the active file can be edited" });
+    const file = buffers.get(filePath);
+    if (!file) {
+      skipped.push({
+        filePath,
+        reason: "File is not in the selected context",
+      });
       continue;
     }
     if (edit.oldText === edit.newText) {
@@ -156,7 +163,7 @@ async function applyRequestedEdits(params: {
       continue;
     }
 
-    const result = applyTextEdit(content, { ...edit, filePath });
+    const result = applyTextEdit(file.content, { ...edit, filePath });
     if (!result.applied) {
       skipped.push({
         filePath,
@@ -168,7 +175,7 @@ async function applyRequestedEdits(params: {
       continue;
     }
 
-    content = result.content;
+    file.content = result.content;
     applied.push({
       filePath,
       oldText: result.edit.originalText,
@@ -184,21 +191,24 @@ async function applyRequestedEdits(params: {
     type: "activity",
     message: `Applying ${applied.length} validated edit${applied.length === 1 ? "" : "s"}`,
   });
-  try {
-    await updateFileViaExistingApi(request, projectId, file.id, content);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "File update failed";
-    return {
-      applied: [],
-      skipped: [
-        ...skipped,
-        ...applied.map((edit) => ({ filePath: edit.filePath, reason })),
-      ],
-    };
+
+  const kept: AppliedEdit[] = [];
+  for (const file of buffers.values()) {
+    const fileEdits = applied.filter((edit) => edit.filePath === file.path);
+    if (fileEdits.length === 0) continue;
+    try {
+      await updateFileViaExistingApi(request, projectId, file.id, file.content);
+      emit({ type: "activity", message: `Verified ${file.path}` });
+      kept.push(...fileEdits);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "File update failed";
+      skipped.push(
+        ...fileEdits.map((edit) => ({ filePath: edit.filePath, reason }))
+      );
+    }
   }
 
-  emit({ type: "activity", message: `Verified ${file.path}` });
-  return { applied, skipped };
+  return { applied: kept, skipped };
 }
 
 export async function POST(request: NextRequest) {
@@ -230,51 +240,74 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Permission denied" }, { status: 403 });
     }
 
-    const activeFilePath = normalizeFilePath(parsed.data.filePath);
-    const [activeFile] = await db
+    const requestedPaths = parsed.data.files.map((file) =>
+      normalizeFilePath(file.path)
+    );
+    if (new Set(requestedPaths).size !== requestedPaths.length) {
+      return NextResponse.json(
+        { error: "Context files must be unique" },
+        { status: 400 }
+      );
+    }
+    if (
+      requestedPaths.some((filePath) => !filePath.toLowerCase().endsWith(".tex"))
+    ) {
+      return NextResponse.json(
+        { error: "Context files must be .tex documents" },
+        { status: 400 }
+      );
+    }
+
+    const projectFileRows = await db
       .select({
         id: projectFiles.id,
         path: projectFiles.path,
         isDirectory: projectFiles.isDirectory,
       })
       .from(projectFiles)
-      .where(eq(projectFiles.projectId, projectId))
-      .then((files) =>
-        files.filter(
-          (file) => !file.isDirectory && file.path === activeFilePath
-        )
-      );
-
-    if (!activeFile) {
-      return NextResponse.json(
-        { error: "File not found in project" },
-        { status: 400 }
-      );
-    }
+      .where(eq(projectFiles.projectId, projectId));
 
     const projectDir = storage.getProjectDir(access.project.userId, projectId);
-    const activeFileContent =
-      typeof parsed.data.fileContent === "string"
-        ? parsed.data.fileContent
-        : await storage
-            .readFile(path.join(projectDir, activeFile.path))
-            .catch(() => "");
+    const contextFiles: Array<{ id: string; path: string; content: string }> =
+      [];
+    for (const [index, filePath] of requestedPaths.entries()) {
+      const row = projectFileRows.find(
+        (file) => !file.isDirectory && file.path === filePath
+      );
+      if (!row) {
+        return NextResponse.json(
+          { error: `File not found in project: ${filePath}` },
+          { status: 400 }
+        );
+      }
+      const clientContent = parsed.data.files[index]?.content;
+      const content =
+        typeof clientContent === "string"
+          ? clientContent
+          : await storage
+              .readFile(path.join(projectDir, row.path))
+              .catch(() => "");
+      contextFiles.push({ id: row.id, path: row.path, content });
+    }
+
     const requestId = randomUUID();
 
     console.info(
-      `[ai/chat:${requestId}] file=${activeFile.path} action=${parsed.data.undoEdits ? "undo" : "chat"}`
+      `[ai/chat:${requestId}] files=${contextFiles.map((file) => file.path).join(",")} action=${parsed.data.undoEdits ? "undo" : "chat"}`
     );
 
     return streamResponse(requestId, async (emit) => {
-      emit({ type: "activity", message: `Reading ${activeFile.path}` });
+      emit({
+        type: "activity",
+        message: `Reading ${contextFiles.map((file) => file.path).join(", ")}`,
+      });
 
       if (parsed.data.undoEdits) {
         emit({ type: "activity", message: "Validating inverse edit" });
         const { applied, skipped } = await applyRequestedEdits({
           request,
           projectId,
-          file: activeFile,
-          content: activeFileContent,
+          files: contextFiles,
           edits: parsed.data.undoEdits,
           emit,
         });
@@ -298,18 +331,21 @@ export async function POST(request: NextRequest) {
         type: "activity",
         message: `Analyzing with ${aiSettings.latexWriter.model}`,
       });
-      const visibleContent = activeFileContent.slice(0, MAX_PROMPT_FILE_CHARS);
+      const visibleFiles = contextFiles.map((file) => {
+        const visibleContent = file.content.slice(0, MAX_PROMPT_FILE_CHARS);
+        return {
+          path: file.path,
+          content: visibleContent,
+          truncated: visibleContent.length < file.content.length,
+        };
+      });
       let reasoningSummaryChars = 0;
       const aiPayload = await completeStrictJson({
         modelSettings: aiSettings.latexWriter,
         systemPrompt,
         userPrompt: JSON.stringify(
           {
-            activeFile: {
-              path: activeFile.path,
-              content: visibleContent,
-              truncated: visibleContent.length < activeFileContent.length,
-            },
+            contextFiles: visibleFiles,
             ...(parsed.data.selection
               ? { selection: parsed.data.selection }
               : {}),
@@ -345,8 +381,7 @@ export async function POST(request: NextRequest) {
       const { applied, skipped } = await applyRequestedEdits({
         request,
         projectId,
-        file: activeFile,
-        content: activeFileContent,
+        files: contextFiles,
         edits: aiResult.data.edits,
         emit,
       });

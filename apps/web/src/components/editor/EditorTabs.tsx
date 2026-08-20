@@ -17,8 +17,8 @@ interface EditorTabsProps {
   dirtyFileIds?: Set<string>;
   onSelectTab: (fileId: string) => void;
   onCloseTab: (fileId: string) => void;
-  /** Optional AI Assistant tab, shown last and swapped in like a file tab */
-  aiTab?: { active: boolean; onSelect: () => void; onClose: () => void };
+  /** Pinned AI tab on the left. Always present when provided; it cannot be closed. */
+  aiTab?: { active: boolean; onSelect: () => void };
 }
 
 // ─── Helpers ────────────────────────────────────────
@@ -77,12 +77,48 @@ export function EditorTabs({
   return (
     <div
       className={cn(
-        "flex h-9 items-stretch overflow-x-auto overflow-y-hidden",
-        "border-b border-border bg-bg-secondary",
-        // Overflow scrolls, but the bar is 36px: no scrollbar eating the row.
-        "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        "flex h-9 items-stretch overflow-hidden",
+        "border-b border-border bg-bg-secondary"
       )}
     >
+      {aiTab && (
+        <div
+          className={cn(
+            TAB_BASE,
+            "sticky left-0 z-10 border-r border-border",
+            aiTab.active ? TAB_ACTIVE : TAB_IDLE
+          )}
+        >
+          {aiTab.active && (
+            <span
+              aria-hidden
+              className="absolute inset-x-0 top-0 h-0.5 bg-accent"
+            />
+          )}
+
+          <button
+            type="button"
+            onClick={aiTab.onSelect}
+            className="flex items-center gap-1.5 pr-1.5 text-xs"
+            title="AI Assistant"
+          >
+            <Sparkles
+              className={cn(
+                "h-3 w-3",
+                aiTab.active ? "text-accent" : "text-text-muted"
+              )}
+            />
+            AI
+          </button>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden",
+          "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        )}
+      >
       {openFiles.map((file) => {
         const isActive = !aiTab?.active && file.id === activeFileId;
         const isDirty = dirtyFileIds?.has(file.id) ?? false;
@@ -137,44 +173,7 @@ export function EditorTabs({
           </div>
         );
       })}
-
-      {aiTab && (
-        <div className={cn(TAB_BASE, aiTab.active ? TAB_ACTIVE : TAB_IDLE)}>
-          {aiTab.active && (
-            <span
-              aria-hidden
-              className="absolute inset-x-0 top-0 h-0.5 bg-accent"
-            />
-          )}
-
-          <button
-            type="button"
-            onClick={aiTab.onSelect}
-            className="flex items-center gap-1.5 text-xs"
-            title="AI Assistant"
-          >
-            <Sparkles
-              className={cn(
-                "h-3 w-3",
-                aiTab.active ? "text-accent" : "text-text-muted"
-              )}
-            />
-            AI Assistant
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              aiTab.onClose();
-            }}
-            aria-label="Close AI assistant"
-            className={CLOSE_BUTTON}
-          >
-            <X aria-hidden className={CLOSE_ICON} />
-          </button>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
