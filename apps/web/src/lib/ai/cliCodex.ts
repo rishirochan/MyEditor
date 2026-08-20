@@ -1,4 +1,8 @@
 import { randomUUID } from "crypto";
+import {
+  completeWithCliBridge,
+  isCliBridgeConfigured,
+} from "@/lib/ai/cliBridge";
 import { readCodexAuth } from "@/lib/ai/cliDetect";
 
 const CODEX_TIMEOUT_MS = 45_000;
@@ -225,6 +229,30 @@ export async function completeWithCodexCli(params: {
   userPrompt: string;
   onProgress?: CodexProgressCallback;
 }): Promise<string> {
+  if (isCliBridgeConfigured()) {
+    params.onProgress?.({
+      type: "status",
+      status: "response.in_progress",
+    });
+    try {
+      const text = await completeWithCliBridge({
+        provider: "codex-cli",
+        model: params.model,
+        effort: params.effort,
+        systemPrompt: params.systemPrompt,
+        userPrompt: params.userPrompt,
+      });
+      params.onProgress?.({
+        type: "status",
+        status: "response.completed",
+      });
+      return text;
+    } catch (error) {
+      params.onProgress?.({ type: "status", status: "response.failed" });
+      throw error;
+    }
+  }
+
   const { accessToken, accountId } = await loadCodexTokens();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CODEX_TIMEOUT_MS);

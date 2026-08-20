@@ -3,6 +3,10 @@ import { homedir } from "os";
 import path from "path";
 import { spawn } from "child_process";
 import { readFile } from "fs/promises";
+import {
+  getCliBridgeStatus,
+  isCliBridgeConfigured,
+} from "@/lib/ai/cliBridge";
 import type { CliModelOption } from "@/lib/ai/cliModels";
 
 export type { CliModelOption };
@@ -259,6 +263,8 @@ async function detectCodex(): Promise<CliProviderStatus> {
 }
 
 export async function detectCliStatus(): Promise<CliStatusSnapshot> {
+  if (isCliBridgeConfigured()) return getCliBridgeStatus();
+
   const [claude, codex] = await Promise.all([detectClaude(), detectCodex()]);
   const { listCliModels } = await import("@/lib/ai/cliModels");
   const models = await listCliModels({ codexBinaryPath: codex.binaryPath });
@@ -268,6 +274,15 @@ export async function detectCliStatus(): Promise<CliStatusSnapshot> {
 export async function startCliLogin(
   provider: "claude-cli" | "codex-cli"
 ): Promise<{ ok: boolean; message: string }> {
+  if (isCliBridgeConfigured()) {
+    const command =
+      provider === "claude-cli" ? "claude auth login" : "codex login";
+    return {
+      ok: false,
+      message: `Run \`${command}\` on the Mac running the CLI bridge, then refresh status.`,
+    };
+  }
+
   if (provider === "claude-cli") {
     const binaryPath = await resolveBinary(CLAUDE_CANDIDATES);
     if (!binaryPath) {

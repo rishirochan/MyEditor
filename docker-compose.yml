@@ -31,7 +31,7 @@ services:
       retries: 5
     networks:
       - backslash
-    restart: unless-stopped
+    restart: always
 
   # ── Database Migrations (init container) ──────────
   # Runs once before app/worker start. On success, exits 0.
@@ -88,6 +88,10 @@ services:
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
+      - CLI_BRIDGE_URL=${CLI_BRIDGE_URL:-http://host.docker.internal:4141}
+      - CLI_BRIDGE_TOKEN=${CLI_BRIDGE_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - project-data:/data/backslash
       - /var/run/docker.sock:/var/run/docker.sock
@@ -102,7 +106,7 @@ services:
         condition: service_healthy
     networks:
       - backslash
-    restart: unless-stopped
+    restart: always
 
   # ── Dedicated Compilation Worker ───────────────────
   worker:
@@ -141,7 +145,7 @@ services:
         condition: service_healthy
     networks:
       - backslash
-    restart: unless-stopped
+    restart: always
 
   # ── WebSocket Server ───────────────────────────────
   # Standalone real-time server for build updates and
@@ -165,7 +169,7 @@ services:
         condition: service_healthy
     networks:
       - backslash
-    restart: unless-stopped
+    restart: always
 
   # ── Redis ──────────────────────────────────────────
   redis:
@@ -181,7 +185,7 @@ services:
       retries: 5
     networks:
       - backslash
-    restart: unless-stopped
+    restart: always
 
 networks:
   backslash:

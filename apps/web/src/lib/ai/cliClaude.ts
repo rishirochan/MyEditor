@@ -1,4 +1,8 @@
 import { spawn } from "child_process";
+import {
+  completeWithCliBridge,
+  isCliBridgeConfigured,
+} from "@/lib/ai/cliBridge";
 import { resolveClaudeBinary } from "@/lib/ai/cliDetect";
 
 const CLAUDE_TIMEOUT_MS = 45_000;
@@ -9,6 +13,10 @@ export async function completeWithClaudeCli(params: {
   systemPrompt: string;
   userPrompt: string;
 }): Promise<string> {
+  if (isCliBridgeConfigured()) {
+    return completeWithCliBridge({ provider: "claude-cli", ...params });
+  }
+
   const binaryPath = await resolveClaudeBinary();
 
   const args = [
