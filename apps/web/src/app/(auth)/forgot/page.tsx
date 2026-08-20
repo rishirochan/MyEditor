@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { CheckCircle2, Loader2 } from "lucide-react";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -27,18 +28,28 @@ export default function ForgotPasswordPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-text-primary">
-        Forgot your password?
+      <h1 className="text-xl font-semibold tracking-tight text-text-primary">
+        Reset your password
       </h1>
 
       {submitted ? (
-        <div className="space-y-4">
-          <div className="rounded-lg bg-success/10 px-4 py-3 text-sm text-success">
-            If an account exists for that email, a reset link has been sent.
-            The link expires in 30 minutes.
+        <div className="mt-6 space-y-5">
+          <div
+            role="status"
+            className="flex items-start gap-2.5 rounded-lg bg-success-subtle px-3.5 py-3 text-sm text-success"
+          >
+            <CheckCircle2
+              className="mt-px h-4 w-4 shrink-0"
+              aria-hidden="true"
+            />
+            <span>
+              If an account exists for that email, a reset link has been sent.
+              The link expires in 30 minutes.
+            </span>
           </div>
-          <p className="text-sm text-text-muted">
-            Didn&apos;t get anything? Double-check the address you entered and try again.
+          <p className="text-sm leading-relaxed text-text-secondary">
+            Nothing arrived? Check the address you entered, then try again. On a
+            self-hosted install, also check that outbound mail is configured.
           </p>
           <Link
             href="/login"
@@ -49,15 +60,16 @@ export default function ForgotPasswordPage() {
         </div>
       ) : (
         <>
-          <p className="mb-6 text-sm text-text-secondary">
-            Enter the email on your account and we&apos;ll send you a link to choose a new password.
+          <p className="mt-1.5 text-sm leading-relaxed text-text-secondary">
+            Enter the email on your account and we&apos;ll send a link to choose
+            a new password.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
+          <form onSubmit={handleSubmit} className="mt-7 space-y-5">
+            <div className="space-y-2">
               <label
                 htmlFor="email"
-                className="mb-1.5 block text-sm font-medium text-text-secondary"
+                className="block text-xs font-medium tracking-wide text-text-muted uppercase"
               >
                 Email
               </label>
@@ -68,20 +80,24 @@ export default function ForgotPasswordPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 placeholder="you@example.com"
-                className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+                className="input"
               />
             </div>
 
             <button
               type="submit"
               disabled={loading || !email}
-              className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              aria-busy={loading}
+              className="btn btn-primary w-full py-2.5"
             >
-              {loading ? "Sending..." : "Send reset link"}
+              {loading && (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              )}
+              {loading ? "Sending" : "Send reset link"}
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-text-muted">
+          <p className="mt-7 border-t border-border-subtle pt-5 text-center text-sm text-text-muted">
             Remembered it?{" "}
             <Link
               href="/login"

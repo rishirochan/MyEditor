@@ -385,7 +385,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
             el.textContent = this.name;
             el.style.cssText = `
               background: ${this.color};
-              color: #fff;
+              color: var(--color-ink-on-hue);
               font-size: 10px;
               font-weight: 600;
               line-height: 1;

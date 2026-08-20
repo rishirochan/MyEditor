@@ -107,6 +107,9 @@ importers:
       nodemailer:
         specifier: ^6.9.16
         version: 6.10.1
+      pdfjs-dist:
+        specifier: 4.8.69
+        version: 4.8.69
       postgres:
         specifier: ^3.4.0
         version: 3.4.8

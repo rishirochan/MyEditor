@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
+import { cn } from "@/lib/utils/cn";
 import {
   Copy,
   Check,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   ArrowLeft,
@@ -48,17 +50,23 @@ interface EndpointSection {
 
 // ─── Method Badge ───────────────────────────────────
 
-function MethodBadge({ method }: { method: string }) {
-  const colors: Record<string, string> = {
-    GET: "bg-accent/15 text-accent border-accent/30",
-    POST: "bg-success/15 text-success border-success/30",
-    PUT: "bg-warning/15 text-warning border-warning/30",
-    DELETE: "bg-error/15 text-error border-error/30",
-  };
+/* The method word is the label; the tint only reinforces it, so the
+   badge still reads correctly in greyscale. Fixed width keeps every
+   path in a section aligned on one column. */
+const METHOD_TONES: Record<string, string> = {
+  GET: "bg-accent-subtle text-accent",
+  POST: "bg-success-subtle text-success",
+  PUT: "bg-warning-subtle text-warning",
+  DELETE: "bg-error-subtle text-error",
+};
 
+function MethodBadge({ method }: { method: string }) {
   return (
     <span
-      className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold font-mono ${colors[method] || "bg-bg-elevated text-text-muted border-border"}`}
+      className={cn(
+        "inline-flex w-[3.5rem] shrink-0 justify-center rounded border border-border-subtle px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wide",
+        METHOD_TONES[method] || "bg-bg-elevated text-text-muted"
+      )}
     >
       {method}
     </span>
@@ -80,15 +88,70 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className="absolute right-2 top-2 rounded-md p-1.5 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+      className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 rounded-md border border-border-subtle bg-bg-elevated px-2 py-1 text-[11px] font-medium text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
       title="Copy"
     >
       {copied ? (
-        <Check className="h-3.5 w-3.5 text-success" />
+        <>
+          <Check className="h-3 w-3 text-success" />
+          Copied
+        </>
       ) : (
-        <Copy className="h-3.5 w-3.5" />
+        <>
+          <Copy className="h-3 w-3" />
+          Copy
+        </>
       )}
     </button>
+  );
+}
+
+/* Code reads as code: recessed surface, hairline, mono, room to
+   breathe, and it scrolls sideways rather than wrapping a curl line. */
+function CodeBlock({ code, copyable = true }: { code: string; copyable?: boolean }) {
+  return (
+    <div className="relative">
+      {copyable && <CopyButton text={code} />}
+      <pre className="overflow-x-auto rounded-lg border border-border-subtle bg-bg-inset p-3 pr-16 font-mono text-xs leading-relaxed whitespace-pre text-text-secondary">
+        {code}
+      </pre>
+    </div>
+  );
+}
+
+function FieldTable({
+  columns,
+  children,
+}: {
+  columns: string[];
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border-subtle">
+      <table className="w-full min-w-[34rem] text-sm">
+        <thead>
+          <tr className="bg-bg-inset text-text-secondary">
+            {columns.map((column) => (
+              <th
+                key={column}
+                className="px-3 py-2 text-left text-[11px] font-medium tracking-wide uppercase"
+              >
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function DocLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h4 className="mb-2 text-xs font-medium tracking-wide text-text-muted uppercase">
+      {children}
+    </h4>
   );
 }
 
@@ -98,153 +161,108 @@ function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
+    <div className="panel overflow-hidden">
       {/* Header */}
       <button
         type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-bg-elevated/50"
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 hover:bg-bg-elevated"
       >
         {expanded ? (
-          <ChevronDown className="h-4 w-4 text-text-muted shrink-0" />
+          <ChevronDown className="h-4 w-4 shrink-0 text-text-muted" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-text-muted shrink-0" />
+          <ChevronRight className="h-4 w-4 shrink-0 text-text-muted" />
         )}
         <MethodBadge method={endpoint.method} />
-        <code className="text-sm font-mono text-text-primary">
+        <code className="truncate font-mono text-sm text-text-primary">
           {endpoint.path}
         </code>
-        <span className="ml-auto text-xs text-text-muted hidden sm:inline">
+        <span className="ml-auto hidden max-w-[32ch] truncate text-xs text-text-muted lg:inline">
           {endpoint.description}
         </span>
       </button>
 
       {/* Expanded content */}
       {expanded && (
-        <div className="border-t border-border px-4 py-4 space-y-4">
-          <p className="text-sm text-text-secondary">
+        <div className="space-y-5 border-t border-border-subtle px-4 py-4">
+          <p className="max-w-[70ch] text-sm text-text-secondary">
             {endpoint.description}
           </p>
 
           {endpoint.notes && (
-            <div className="rounded-lg bg-warning/10 border border-warning/20 px-3 py-2 text-sm text-text-secondary">
-              <strong className="text-warning">Note:</strong> {endpoint.notes}
-            </div>
+            <p className="flex max-w-[70ch] items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2.5 text-sm text-warning">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{endpoint.notes}</span>
+            </p>
           )}
 
           {/* Request body */}
           {endpoint.body && (
             <div>
-              <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
-                Request Body (JSON)
-              </h4>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-bg-elevated text-text-secondary">
-                      <th className="px-3 py-2 text-left font-medium">
-                        Field
-                      </th>
-                      <th className="px-3 py-2 text-left font-medium">Type</th>
-                      <th className="px-3 py-2 text-left font-medium">
-                        Required
-                      </th>
-                      <th className="px-3 py-2 text-left font-medium">
-                        Description
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(endpoint.body).map(([name, field]) => (
-                      <tr key={name} className="border-t border-border">
-                        <td className="px-3 py-2 font-mono text-accent text-xs">
-                          {name}
-                        </td>
-                        <td className="px-3 py-2 text-text-muted text-xs">
-                          {field.type}
-                        </td>
-                        <td className="px-3 py-2">
-                          {field.required ? (
-                            <span className="text-xs text-error font-medium">
-                              Yes
-                            </span>
-                          ) : (
-                            <span className="text-xs text-text-muted">No</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-text-secondary text-xs">
-                          {field.description}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DocLabel>Request body (JSON)</DocLabel>
+              <FieldTable columns={["Field", "Type", "Required", "Description"]}>
+                {Object.entries(endpoint.body).map(([name, field]) => (
+                  <tr key={name} className="border-t border-border-subtle">
+                    <td className="px-3 py-2 font-mono text-xs text-text-primary">
+                      {name}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-text-muted">
+                      {field.type}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {field.required ? (
+                        <span className="font-medium text-text-primary">
+                          Required
+                        </span>
+                      ) : (
+                        <span className="text-text-muted">Optional</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-text-secondary">
+                      {field.description}
+                    </td>
+                  </tr>
+                ))}
+              </FieldTable>
             </div>
           )}
 
           {/* Query params */}
           {endpoint.query && (
             <div>
-              <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
-                Query Parameters
-              </h4>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-bg-elevated text-text-secondary">
-                      <th className="px-3 py-2 text-left font-medium">
-                        Param
-                      </th>
-                      <th className="px-3 py-2 text-left font-medium">Type</th>
-                      <th className="px-3 py-2 text-left font-medium">
-                        Description
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(endpoint.query).map(([name, field]) => (
-                      <tr key={name} className="border-t border-border">
-                        <td className="px-3 py-2 font-mono text-accent text-xs">
-                          {name}
-                        </td>
-                        <td className="px-3 py-2 text-text-muted text-xs">
-                          {field.type}
-                        </td>
-                        <td className="px-3 py-2 text-text-secondary text-xs">
-                          {field.description}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DocLabel>Query parameters</DocLabel>
+              <FieldTable columns={["Param", "Type", "Description"]}>
+                {Object.entries(endpoint.query).map(([name, field]) => (
+                  <tr key={name} className="border-t border-border-subtle">
+                    <td className="px-3 py-2 font-mono text-xs text-text-primary">
+                      {name}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-text-muted">
+                      {field.type}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-text-secondary">
+                      {field.description}
+                    </td>
+                  </tr>
+                ))}
+              </FieldTable>
             </div>
           )}
 
           {/* Response */}
           {endpoint.response && (
             <div>
-              <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
-                Response
-              </h4>
-              <div className="relative rounded-lg bg-bg-tertiary border border-border p-3 font-mono text-xs text-text-secondary overflow-x-auto">
-                <CopyButton text={endpoint.response} />
-                <pre className="whitespace-pre">{endpoint.response}</pre>
-              </div>
+              <DocLabel>Response</DocLabel>
+              <CodeBlock code={endpoint.response} />
             </div>
           )}
 
           {/* cURL example */}
           {endpoint.curl && (
             <div>
-              <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
-                Example
-              </h4>
-              <div className="relative rounded-lg bg-bg-tertiary border border-border p-3 font-mono text-xs text-text-secondary overflow-x-auto">
-                <CopyButton text={endpoint.curl} />
-                <pre className="whitespace-pre">{endpoint.curl}</pre>
-              </div>
+              <DocLabel>Example request</DocLabel>
+              <CodeBlock code={endpoint.curl} />
             </div>
           )}
         </div>
@@ -968,36 +986,52 @@ curl "${BASE}/compile/JOB_ID/output?format=pdf" \\
 
 // ─── Table of Contents ──────────────────────────────
 
+/** Same slug the sections render, so the anchors always line up. */
+function sectionId(title: string): string {
+  return title.toLowerCase().replace(/\s+/g, "-");
+}
+
+const STATIC_SECTIONS = [
+  { id: "authentication", title: "Authentication" },
+  { id: "errors", title: "Error handling" },
+];
+
+const ERROR_CODES: { code: string; meaning: string }[] = [
+  { code: "200", meaning: "Success" },
+  { code: "201", meaning: "Resource created" },
+  { code: "202", meaning: "Accepted, async job queued (compilation)" },
+  { code: "400", meaning: "Bad request, invalid input or validation error" },
+  { code: "401", meaning: "Unauthorized, missing or invalid API key" },
+  { code: "403", meaning: "Forbidden, API key expired" },
+  { code: "404", meaning: "Not found, resource does not exist or is not yours" },
+  { code: "409", meaning: "Conflict, resource already exists (duplicate file path)" },
+  { code: "422", meaning: "Unprocessable, compilation failed or produced no output" },
+  { code: "500", meaning: "Internal server error" },
+];
+
 function TableOfContents({ sections }: { sections: EndpointSection[] }) {
   return (
-    <nav className="hidden lg:block w-56 shrink-0 self-start sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto">
-      <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">
+    <nav
+      aria-label="On this page"
+      className="sticky top-8 hidden max-h-[calc(100vh-5rem)] w-52 shrink-0 self-start overflow-y-auto border-l border-border-subtle pl-5 lg:block"
+    >
+      <h2 className="mb-3 text-xs font-medium tracking-wide text-text-muted uppercase">
         On this page
-      </h3>
-      <ul className="space-y-1.5">
-        <li>
-          <a
-            href="#authentication"
-            className="text-sm text-text-secondary hover:text-text-primary transition-colors"
-          >
-            Authentication
-          </a>
-        </li>
-        <li>
-          <a
-            href="#errors"
-            className="text-sm text-text-secondary hover:text-text-primary transition-colors"
-          >
-            Error Handling
-          </a>
-        </li>
-        {sections.map((section) => (
-          <li key={section.title}>
+      </h2>
+      <ul className="space-y-0.5">
+        {[
+          ...STATIC_SECTIONS,
+          ...sections.map((section) => ({
+            id: sectionId(section.title),
+            title: section.title,
+          })),
+        ].map((item) => (
+          <li key={item.id}>
             <a
-              href={`#${section.title.toLowerCase().replace(/\s+/g, "-")}`}
-              className="text-sm text-text-secondary hover:text-text-primary transition-colors"
+              href={`#${item.id}`}
+              className="block rounded-md px-2 py-1 text-sm text-text-secondary transition-colors duration-150 hover:bg-bg-elevated hover:text-text-primary"
             >
-              {section.title}
+              {item.title}
             </a>
           </li>
         ))}
@@ -1018,175 +1052,124 @@ export default function ApiDocsPage() {
   const sections = useMemo(() => getSections(origin), [origin]);
 
   return (
-    <div className="flex items-start gap-8">
-      {/* Main content */}
-      <div className="flex-1 min-w-0">
-        {/* Back link & heading */}
+    <div className="flex items-start gap-10">
+      {/* Main column. Prose caps at ~70ch; tables and code run wider. */}
+      <div className="min-w-0 flex-1">
         <Link
           href="/dashboard/developers"
-          className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors mb-6"
+          className="mb-6 inline-flex items-center gap-1.5 text-sm text-text-muted transition-colors hover:text-text-primary"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Developer Settings
+          Back to API keys
         </Link>
 
-        <h1 className="text-3xl font-bold text-text-primary mb-2">
-          API Documentation
-        </h1>
-        <p className="text-text-secondary mb-8">
-          The MyEditor API lets you compile LaTeX documents, manage projects,
-          and upload files programmatically. Public API endpoints use API key
-          auth, while dashboard AI endpoints use session auth.
-        </p>
-
-        {/* Base URL */}
-        <div className="rounded-lg border border-border bg-bg-secondary p-4 mb-8 space-y-3">
-          <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
-            Base URLs
-          </h3>
-          <div className="space-y-2">
-            <div>
-              <p className="text-xs text-text-muted mb-1">
-                Public API (API key auth)
-              </p>
-              <code className="text-sm font-mono text-accent">
-                {typeof window !== "undefined"
-                  ? `${window.location.origin}/api/v1`
-                  : "https://your-instance.com/api/v1"}
-              </code>
-            </div>
-            <div>
-              <p className="text-xs text-text-muted mb-1">
-                Dashboard endpoints (session auth)
-              </p>
-              <code className="text-sm font-mono text-accent">
-                {typeof window !== "undefined"
-                  ? `${window.location.origin}/api`
-                  : "https://your-instance.com/api"}
-              </code>
-            </div>
-          </div>
-        </div>
-
-        {/* Authentication */}
-        <section id="authentication" className="mb-10">
-          <h2 className="text-xl font-bold text-text-primary mb-3">
-            Authentication
-          </h2>
-          <p className="text-sm text-text-secondary mb-4">
-            Public endpoints under{" "}
-            <code className="text-accent font-mono text-xs bg-bg-elevated px-1.5 py-0.5 rounded">
+        <header className="mb-8">
+          <h1 className="text-2xl font-semibold text-text-primary">
+            API reference
+          </h1>
+          <p className="mt-2 max-w-[70ch] text-sm leading-relaxed text-text-secondary">
+            Compile LaTeX documents, manage projects, and upload files
+            programmatically. Endpoints under{" "}
+            <code className="rounded bg-bg-inset px-1.5 py-0.5 font-mono text-xs text-text-primary">
               /api/v1
             </code>{" "}
-            must include your API key in the{" "}
-            <code className="text-accent font-mono text-xs bg-bg-elevated px-1.5 py-0.5 rounded">
+            authenticate with an API key. Dashboard endpoints authenticate with
+            your signed-in session.
+          </p>
+        </header>
+
+        {/* Base URLs */}
+        <section className="mb-10">
+          <h2 className="mb-3 text-xs font-medium tracking-wide text-text-muted uppercase">
+            Base URLs
+          </h2>
+          <dl className="rounded-lg border border-border-subtle bg-bg-inset px-3">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2.5">
+              <dt className="w-44 shrink-0 text-xs text-text-muted">
+                Public API, key auth
+              </dt>
+              <dd className="font-mono text-sm break-all text-text-primary">
+                {origin}/api/v1
+              </dd>
+            </div>
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-border-subtle py-2.5">
+              <dt className="w-44 shrink-0 text-xs text-text-muted">
+                Dashboard, session auth
+              </dt>
+              <dd className="font-mono text-sm break-all text-text-primary">
+                {origin}/api
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        {/* Authentication */}
+        <section id="authentication" className="mb-12 scroll-mt-8">
+          <h2 className="text-lg font-semibold text-text-primary">
+            Authentication
+          </h2>
+          <p className="mt-2 mb-4 max-w-[70ch] text-sm leading-relaxed text-text-secondary">
+            Public endpoints under{" "}
+            <code className="rounded bg-bg-inset px-1.5 py-0.5 font-mono text-xs text-text-primary">
+              /api/v1
+            </code>{" "}
+            must send your API key in the{" "}
+            <code className="rounded bg-bg-inset px-1.5 py-0.5 font-mono text-xs text-text-primary">
               Authorization
             </code>{" "}
-            header using the Bearer scheme:
+            header using the Bearer scheme.
           </p>
-          <div className="relative rounded-lg bg-bg-tertiary border border-border p-3 font-mono text-xs text-text-secondary mb-4">
-            <CopyButton text='Authorization: Bearer bs_YOUR_API_KEY' />
-            <pre>Authorization: Bearer bs_YOUR_API_KEY</pre>
-          </div>
-          <p className="text-sm text-text-secondary mb-4">
+
+          <CodeBlock code="Authorization: Bearer bs_YOUR_API_KEY" />
+
+          <p className="mt-4 max-w-[70ch] text-sm leading-relaxed text-text-secondary">
             Dashboard endpoints under{" "}
-            <code className="text-accent font-mono text-xs bg-bg-elevated px-1.5 py-0.5 rounded">
+            <code className="rounded bg-bg-inset px-1.5 py-0.5 font-mono text-xs text-text-primary">
               /api/ai
             </code>{" "}
-            use signed session cookies (web login) and do not accept API keys.
+            use signed session cookies from the web login and do not accept API
+            keys.
           </p>
-          <p className="text-sm text-text-secondary">
-            API keys can be created and managed in your{" "}
+          <p className="mt-3 max-w-[70ch] text-sm leading-relaxed text-text-secondary">
+            Keys are created and revoked in{" "}
             <Link
               href="/dashboard/developers"
-              className="text-accent hover:text-accent-hover"
+              className="text-accent transition-colors hover:text-accent-hover"
             >
-              Developer Settings
+              API keys
             </Link>
-            . Each account can have up to 10 API keys.
+            . Each account can hold up to 10.
           </p>
         </section>
 
-        {/* Rate Limits */}
-        <section id="errors" className="mb-10">
-          <h2 className="text-xl font-bold text-text-primary mb-3">
-            Error Handling
+        {/* Error handling */}
+        <section id="errors" className="mb-12 scroll-mt-8">
+          <h2 className="text-lg font-semibold text-text-primary">
+            Error handling
           </h2>
-          <p className="text-sm text-text-secondary mb-4">
-            The API uses standard HTTP status codes. Errors return a JSON body:
+          <p className="mt-2 mb-4 max-w-[70ch] text-sm leading-relaxed text-text-secondary">
+            The API uses standard HTTP status codes. Every error returns a JSON
+            body with a single human-readable message.
           </p>
-          <div className="relative rounded-lg bg-bg-tertiary border border-border p-3 font-mono text-xs text-text-secondary mb-4">
-            <pre>{`{
-  "error": "A human-readable error message"
-}`}</pre>
-          </div>
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-bg-elevated text-text-secondary">
-                  <th className="px-3 py-2 text-left font-medium">Code</th>
-                  <th className="px-3 py-2 text-left font-medium">Meaning</th>
-                </tr>
-              </thead>
-              <tbody className="text-text-secondary">
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">200</td>
-                  <td className="px-3 py-2 text-xs">Success</td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">201</td>
-                  <td className="px-3 py-2 text-xs">Resource created</td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">202</td>
-                  <td className="px-3 py-2 text-xs">
-                    Accepted — async job queued (compilation)
+
+          <CodeBlock
+            code={'{\n  "error": "A human-readable error message"\n}'}
+            copyable={false}
+          />
+
+          <div className="mt-4">
+            <FieldTable columns={["Code", "Meaning"]}>
+              {ERROR_CODES.map((row) => (
+                <tr key={row.code} className="border-t border-border-subtle">
+                  <td className="w-20 px-3 py-2 font-mono text-xs text-text-primary tabular-nums">
+                    {row.code}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-text-secondary">
+                    {row.meaning}
                   </td>
                 </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">400</td>
-                  <td className="px-3 py-2 text-xs">
-                    Bad request — invalid input or validation error
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">401</td>
-                  <td className="px-3 py-2 text-xs">
-                    Unauthorized — missing or invalid API key
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">403</td>
-                  <td className="px-3 py-2 text-xs">
-                    Forbidden — API key expired
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">404</td>
-                  <td className="px-3 py-2 text-xs">
-                    Not found — resource does not exist or you don&apos;t own it
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">409</td>
-                  <td className="px-3 py-2 text-xs">
-                    Conflict — resource already exists (e.g. duplicate file path)
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">422</td>
-                  <td className="px-3 py-2 text-xs">
-                    Unprocessable — compilation failed or could not produce output
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 font-mono text-xs">500</td>
-                  <td className="px-3 py-2 text-xs">
-                    Internal server error
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+              ))}
+            </FieldTable>
           </div>
         </section>
 
@@ -1194,19 +1177,19 @@ export default function ApiDocsPage() {
         {sections.map((section) => (
           <section
             key={section.title}
-            id={section.title.toLowerCase().replace(/\s+/g, "-")}
-            className="mb-10"
+            id={sectionId(section.title)}
+            className="mb-12 scroll-mt-8"
           >
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-accent">{section.icon}</span>
-              <h2 className="text-xl font-bold text-text-primary">
+            <div className="flex items-center gap-2.5">
+              <span className="text-text-muted">{section.icon}</span>
+              <h2 className="text-lg font-semibold text-text-primary">
                 {section.title}
               </h2>
             </div>
-            <p className="text-sm text-text-secondary mb-4">
+            <p className="mt-2 mb-4 max-w-[70ch] text-sm leading-relaxed text-text-secondary">
               {section.description}
             </p>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {section.endpoints.map((endpoint) => (
                 <EndpointCard
                   key={`${endpoint.method}-${endpoint.path}`}
@@ -1217,18 +1200,16 @@ export default function ApiDocsPage() {
           </section>
         ))}
 
-        {/* Footer */}
-        <div className="mt-12 pt-6 border-t border-border">
+        <div className="mt-12 border-t border-border-subtle pt-6">
           <Link
             href="/dashboard/developers"
-            className="text-sm text-text-muted hover:text-text-primary transition-colors"
+            className="text-sm text-text-muted transition-colors hover:text-text-primary"
           >
-            ← Back to Developer Settings
+            Back to API keys
           </Link>
         </div>
       </div>
 
-      {/* Sidebar TOC */}
       <TableOfContents sections={sections} />
     </div>
   );

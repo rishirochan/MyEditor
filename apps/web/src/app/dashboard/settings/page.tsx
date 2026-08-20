@@ -1,8 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
-import { Loader2, Check, AlertCircle, Sparkles, RefreshCw } from "lucide-react";
+import {
+  Loader2,
+  Check,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Sparkles,
+  RefreshCw,
+  Terminal,
+} from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import {
   Select,
@@ -191,6 +206,89 @@ function normalizeCliOnlyModelState(
   };
 }
 
+/* ─── Page primitives ───────────────────────────────────────
+   Three tiny local components so every section, field, and
+   banner on this page shares one rhythm. */
+
+function Section({
+  title,
+  description,
+  icon,
+  children,
+}: {
+  title: string;
+  description: string;
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="grid gap-5 border-t border-border-subtle pt-8 md:grid-cols-[14rem_minmax(0,1fr)] md:gap-10">
+      <div className="md:sticky md:top-8 md:self-start">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-text-primary">
+          {icon}
+          {title}
+        </h2>
+        <p className="mt-1.5 max-w-[42ch] text-sm text-text-secondary">
+          {description}
+        </p>
+      </div>
+      <div className="min-w-0 space-y-5">{children}</div>
+    </section>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  hint,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor={htmlFor}
+        className="block text-xs font-medium tracking-wide text-text-muted uppercase"
+      >
+        {label}
+      </label>
+      {children}
+      {hint ? (
+        <p className="max-w-[70ch] text-xs text-text-muted">{hint}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/* Feedback never rides on hue alone: icon + text carry the state. */
+function Notice({
+  tone,
+  children,
+}: {
+  tone: "success" | "error";
+  children: ReactNode;
+}) {
+  const Icon = tone === "success" ? CheckCircle2 : AlertCircle;
+  return (
+    <p
+      role={tone === "error" ? "alert" : "status"}
+      className={cn(
+        "flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm",
+        tone === "success"
+          ? "bg-success-subtle text-success"
+          : "bg-error-subtle text-error"
+      )}
+    >
+      <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
 function AiModelField({
   provider,
   model,
@@ -213,7 +311,7 @@ function AiModelField({
         value={model}
         onChange={(e) => onModelChange(e.target.value, null)}
         required
-        className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+        className="input"
         placeholder={defaultModelForProvider(provider)}
       />
     );
@@ -257,7 +355,7 @@ function AiModelField({
           onModelChange(value, nextEffort);
         }}
       >
-        <SelectTrigger className="w-full bg-bg-primary">
+        <SelectTrigger className="w-full bg-bg-inset">
           <SelectValue placeholder="Select model" />
         </SelectTrigger>
         <SelectContent>
@@ -270,14 +368,14 @@ function AiModelField({
       </Select>
 
       {isCliProvider(provider) && efforts.length > 0 && (
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-text-muted">
+        <div className="space-y-1.5">
+          <span className="block text-xs font-medium tracking-wide text-text-muted uppercase">
             Intelligence
-          </label>
+          </span>
           <div
             role="radiogroup"
             aria-label="Intelligence level"
-            className="flex flex-wrap gap-1 rounded-lg border border-border bg-bg-primary p-1"
+            className="flex flex-wrap gap-1 rounded-lg border border-border bg-bg-inset p-1"
           >
             {efforts.map((level) => {
               const selectedEffort = level.effort === activeEffort;
@@ -290,9 +388,9 @@ function AiModelField({
                   title={level.description || effortLabel(level.effort)}
                   onClick={() => onEffortChange(level.effort)}
                   className={cn(
-                    "min-w-[3.25rem] flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                    "min-w-[3.25rem] flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors duration-150",
                     selectedEffort
-                      ? "bg-accent text-white"
+                      ? "bg-accent text-accent-fg"
                       : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                   )}
                 >
@@ -342,7 +440,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/ai/cli-status", {
         cache: "no-store",
-        signal: AbortSignal.timeout(12_000),
+        signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) {
         setCliMessage("Failed to detect local CLI status");
@@ -625,8 +723,36 @@ export default function SettingsPage() {
     );
   }
 
+  const emailChanged =
+    email.trim().toLowerCase() !== user.email.toLowerCase();
+
+  // Both purposes render the identical provider → model → credentials
+  // chain, so they are one template rather than two copies that drift.
+  const purposes: {
+    key: "buildFix" | "latexWriter";
+    title: string;
+    description: string;
+    state: AiModelFormState;
+    setState: (updater: (prev: AiModelFormState) => AiModelFormState) => void;
+  }[] = [
+    {
+      key: "buildFix",
+      title: "Build fix",
+      description: "Runs behind Fix with AI in the build log.",
+      state: buildFixModel,
+      setState: setBuildFixModel,
+    },
+    {
+      key: "latexWriter",
+      title: "LaTeX writer",
+      description: "Runs the writing and generation actions in the editor.",
+      state: latexWriterModel,
+      setState: setLatexWriterModel,
+    },
+  ];
+
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       <PasswordPromptDialog
         open={pwPromptOpen}
         title="Confirm email change"
@@ -645,43 +771,23 @@ export default function SettingsPage() {
         }}
       />
 
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Manage profile and AI model preferences
+      <header>
+        <h1 className="text-2xl font-semibold text-text-primary">Settings</h1>
+        <p className="mt-1.5 max-w-[70ch] text-sm text-text-secondary">
+          Your account details, and the models MyEditor runs for each AI task.
+          Changes apply to every project on this account.
         </p>
-      </div>
+      </header>
 
-      <section className="max-w-2xl space-y-5">
-        <div className="border-b border-border pb-2">
-          <h2 className="text-lg font-semibold text-text-primary">Profile</h2>
-          <p className="text-xs text-text-muted">
-            Update your account details
-          </p>
-        </div>
+      <Section
+        title="Account"
+        description="Your name and the address you sign in with."
+      >
+        {profileError && <Notice tone="error">{profileError}</Notice>}
+        {profileSuccess && <Notice tone="success">{profileSuccess}</Notice>}
 
-        {profileError && (
-          <div className="flex items-center gap-2 rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            {profileError}
-          </div>
-        )}
-
-        {profileSuccess && (
-          <div className="flex items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm text-success">
-            <Check className="h-4 w-4 shrink-0" />
-            {profileSuccess}
-          </div>
-        )}
-
-        <form onSubmit={onProfileSubmit} className="space-y-4">
-          <div>
-            <label
-              htmlFor="name"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Name
-            </label>
+        <form onSubmit={onProfileSubmit} className="space-y-5">
+          <Field label="Name" htmlFor="name">
             <input
               id="name"
               type="text"
@@ -689,94 +795,84 @@ export default function SettingsPage() {
               onChange={(e) => setName(e.target.value)}
               required
               maxLength={255}
-              className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+              className="input"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label
-              htmlFor="email"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Email
-            </label>
+          <Field
+            label="Email"
+            htmlFor="email"
+            hint="Used to sign in. Changing it requires your current password."
+          >
             <input
               id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+              className="input"
             />
-            {user && email.trim().toLowerCase() !== user.email.toLowerCase() && (
-              <p className="mt-1 text-xs text-text-muted">
-                Changing your email will require your current password.
-              </p>
-            )}
-          </div>
+          </Field>
 
-          <button
-            type="submit"
-            disabled={profileSaving}
-            className="rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {profileSaving ? "Saving..." : "Save Profile"}
-          </button>
+          {emailChanged && (
+            <p className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2.5 text-sm text-warning">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Saving will change the address on your account. You will be
+                asked for your current password to confirm.
+              </span>
+            </p>
+          )}
+
+          <div className="border-t border-border-subtle pt-5">
+            <button
+              type="submit"
+              disabled={profileSaving}
+              className="btn btn-primary px-4 py-2.5"
+            >
+              {profileSaving && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              )}
+              {profileSaving ? "Saving" : "Save account"}
+            </button>
+          </div>
         </form>
-      </section>
+      </Section>
 
-      <section className="max-w-4xl space-y-5">
-        <div className="border-b border-border pb-2">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-text-primary">
-            <Sparkles className="h-4 w-4 text-accent" />
-            AI Settings
-          </h2>
-          <p className="text-xs text-text-muted">
-            Choose separate providers/models for build fixes and LaTeX writing
-          </p>
-        </div>
+      <Section
+        title="AI models"
+        icon={<Sparkles className="h-4 w-4 text-accent" />}
+        description="Each AI task picks its own provider and model. Providers run through a CLI on this machine, so a provider is only usable once its CLI is signed in."
+      >
+        {aiError && <Notice tone="error">{aiError}</Notice>}
+        {aiSuccess && <Notice tone="success">{aiSuccess}</Notice>}
 
-        {aiError && (
-          <div className="flex items-center gap-2 rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            {aiError}
-          </div>
-        )}
-
-        {aiSuccess && (
-          <div className="flex items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm text-success">
-            <Check className="h-4 w-4 shrink-0" />
-            {aiSuccess}
-          </div>
-        )}
-
-        <form onSubmit={saveAiSettings} className="space-y-6">
-          <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-4">
+        <form onSubmit={saveAiSettings} className="space-y-8">
+          <div className="space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-sm font-semibold text-text-primary">
-                  Local CLI status
+                  1. Provider access
                 </h3>
-                <p className="mt-1 text-xs text-text-muted">
-                  Use your Claude or ChatGPT subscription via the CLIs already
-                  installed on this machine. No proxy required.
-                </p>
               </div>
               <button
                 type="button"
                 onClick={() => void refreshCliStatus()}
                 disabled={cliStatusLoading}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-tertiary disabled:opacity-50"
+                className="btn btn-secondary"
               >
                 <RefreshCw
-                  className={cn("h-3.5 w-3.5", cliStatusLoading && "animate-spin")}
+                  className={cn(
+                    "h-3.5 w-3.5",
+                    cliStatusLoading && "animate-spin"
+                  )}
                 />
                 Refresh
               </button>
             </div>
 
             {cliMessage && (
-              <p className="text-xs text-text-muted">{cliMessage}</p>
+              <p className="text-xs text-text-secondary">{cliMessage}</p>
             )}
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -796,42 +892,64 @@ export default function SettingsPage() {
               ).map(({ key, label, provider }) => {
                 const status = cliStatus?.[key];
                 const ready = Boolean(status?.installed && status.authenticated);
+                // Status is never hue alone: icon and words carry it too.
+                const StateIcon = !status
+                  ? Loader2
+                  : ready
+                    ? Check
+                    : status.installed
+                      ? AlertTriangle
+                      : AlertCircle;
+                const stateLabel = !status
+                  ? "Checking"
+                  : !status.installed
+                    ? "Not installed"
+                    : status.authenticated
+                      ? "Signed in"
+                      : "Not signed in";
+                const stateTone = !status
+                  ? "text-text-muted"
+                  : ready
+                    ? "text-success"
+                    : status.installed
+                      ? "text-warning"
+                      : "text-text-muted";
+
                 return (
-                  <div
-                    key={key}
-                    className="rounded-md border border-border bg-bg-primary p-3 space-y-2"
-                  >
+                  <div key={key} className="panel space-y-2.5 p-3.5">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-medium text-text-primary">
                         {label}
                       </p>
                       <span
                         className={cn(
-                          "text-[11px] font-medium",
-                          ready ? "text-success" : "text-text-muted"
+                          "inline-flex items-center gap-1.5 text-xs font-medium",
+                          stateTone
                         )}
                       >
-                        {!status
-                          ? "Checking…"
-                          : !status.installed
-                            ? "Not installed"
-                            : status.authenticated
-                              ? "Logged in"
-                              : "Not logged in"}
+                        <StateIcon
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            !status && "animate-spin"
+                          )}
+                        />
+                        {stateLabel}
                       </span>
                     </div>
-                    <p className="text-xs text-text-muted break-all">
-                      {status?.email
-                        ? status.email
-                        : status?.binaryPath
-                          ? status.binaryPath
-                          : status?.detail || "—"}
+
+                    <p className="font-mono text-xs break-all text-text-muted">
+                      {status?.email ||
+                        status?.binaryPath ||
+                        status?.detail ||
+                        "Not detected"}
                     </p>
+
                     {status?.subscriptionType && status.authenticated && (
-                      <p className="text-[11px] text-text-muted">
+                      <p className="text-xs text-text-muted">
                         Plan: {status.subscriptionType}
                       </p>
                     )}
+
                     {!ready && (
                       <button
                         type="button"
@@ -839,9 +957,9 @@ export default function SettingsPage() {
                         disabled={
                           !status?.installed || cliLoginBusy === provider
                         }
-                        className="rounded-md bg-accent/15 px-2.5 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="btn btn-secondary"
                       >
-                        {cliLoginBusy === provider ? "Opening…" : "Log in"}
+                        {cliLoginBusy === provider ? "Opening" : "Sign in"}
                       </button>
                     )}
                   </div>
@@ -850,252 +968,142 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-4">
-              <div>
-                <h3 className="text-sm font-semibold text-text-primary">
-                  Build Fix AI
-                </h3>
-                <p className="text-xs text-text-muted">
-                  Used by “Fix with AI” in build logs
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                  Provider
-                </label>
-                <Select
-                  value={buildFixModel.provider}
-                  onValueChange={(value) =>
-                    onProviderChange("buildFix", value as AiProvider)
-                  }
-                >
-                  <SelectTrigger className="w-full bg-bg-primary">
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="claude-cli">
-                      Claude CLI (subscription)
-                    </SelectItem>
-                    <SelectItem value="codex-cli">
-                      Codex CLI (subscription)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                  Model
-                </label>
-                <AiModelField
-                  provider={buildFixModel.provider}
-                  model={buildFixModel.model}
-                  effort={buildFixModel.effort}
-                  cliModels={cliStatus?.models ?? null}
-                  onModelChange={(value, nextEffort) =>
-                    setBuildFixModel((prev) => ({
-                      ...prev,
-                      model: value,
-                      effort: nextEffort,
-                    }))
-                  }
-                  onEffortChange={(value) =>
-                    setBuildFixModel((prev) => ({ ...prev, effort: value }))
-                  }
-                />
-              </div>
-
-              {!isCliProvider(buildFixModel.provider) && (
-                <>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                      Endpoint URL
-                    </label>
-                    <input
-                      type="url"
-                      value={buildFixModel.endpoint}
-                      onChange={(e) =>
-                        setBuildFixModel((prev) => ({
-                          ...prev,
-                          endpoint: e.target.value,
-                        }))
-                      }
-                      className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
-                      placeholder={
-                        buildFixModel.provider === "custom"
-                          ? "https://your-host/v1"
-                          : "Optional override"
-                      }
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                      API Key
-                    </label>
-                    <PasswordInput
-                      value={buildFixModel.apiKey}
-                      onChange={(e) =>
-                        setBuildFixModel((prev) => ({
-                          ...prev,
-                          apiKey: e.target.value,
-                        }))
-                      }
-                      className="bg-bg-primary"
-                      placeholder={
-                        buildFixModel.apiKeySet
-                          ? "Stored key exists, leave blank to keep"
-                          : "sk-..."
-                      }
-                    />
-                    <p className="mt-1 text-xs text-text-muted">
-                      Required for API providers. Saved encrypted to your account.
-                      Leave blank to use the server&apos;s fallback key if configured.
-                    </p>
-                  </div>
-                </>
-              )}
-
-              {isCliProvider(buildFixModel.provider) && (
-                <p className="text-xs text-text-muted">
-                  Uses your local {providerLabel(buildFixModel.provider)} login.
-                  No API key or endpoint needed.
-                </p>
-              )}
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">
+                2. Model per task
+              </h3>
             </div>
 
-            <div className="rounded-lg border border-border bg-bg-secondary p-4 space-y-4">
-              <div>
-                <h3 className="text-sm font-semibold text-text-primary">
-                  LaTeX Writer AI
-                </h3>
-                <p className="text-xs text-text-muted">
-                  Reserved for AI writing/generation actions
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                  Provider
-                </label>
-                <Select
-                  value={latexWriterModel.provider}
-                  onValueChange={(value) =>
-                    onProviderChange("latexWriter", value as AiProvider)
-                  }
-                >
-                  <SelectTrigger className="w-full bg-bg-primary">
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="claude-cli">
-                      Claude CLI (subscription)
-                    </SelectItem>
-                    <SelectItem value="codex-cli">
-                      Codex CLI (subscription)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                  Model
-                </label>
-                <AiModelField
-                  provider={latexWriterModel.provider}
-                  model={latexWriterModel.model}
-                  effort={latexWriterModel.effort}
-                  cliModels={cliStatus?.models ?? null}
-                  onModelChange={(value, nextEffort) =>
-                    setLatexWriterModel((prev) => ({
-                      ...prev,
-                      model: value,
-                      effort: nextEffort,
-                    }))
-                  }
-                  onEffortChange={(value) =>
-                    setLatexWriterModel((prev) => ({ ...prev, effort: value }))
-                  }
-                />
-              </div>
-
-              {!isCliProvider(latexWriterModel.provider) && (
-                <>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {purposes.map((purpose) => (
+                <div key={purpose.key} className="panel space-y-4 p-4">
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                      Endpoint URL
-                    </label>
-                    <input
-                      type="url"
-                      value={latexWriterModel.endpoint}
-                      onChange={(e) =>
-                        setLatexWriterModel((prev) => ({
-                          ...prev,
-                          endpoint: e.target.value,
-                        }))
-                      }
-                      className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
-                      placeholder={
-                        latexWriterModel.provider === "custom"
-                          ? "https://your-host/v1"
-                          : "Optional override"
-                      }
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-                      API Key
-                    </label>
-                    <PasswordInput
-                      value={latexWriterModel.apiKey}
-                      onChange={(e) =>
-                        setLatexWriterModel((prev) => ({
-                          ...prev,
-                          apiKey: e.target.value,
-                        }))
-                      }
-                      className="bg-bg-primary"
-                      placeholder={
-                        latexWriterModel.apiKeySet
-                          ? "Stored key exists, leave blank to keep"
-                          : "sk-..."
-                      }
-                    />
-                    <p className="mt-1 text-xs text-text-muted">
-                      Required for API providers. Saved encrypted to your account.
-                      Leave blank to use the server&apos;s fallback key if configured.
+                    <h4 className="text-sm font-semibold text-text-primary">
+                      {purpose.title}
+                    </h4>
+                    <p className="mt-0.5 text-xs text-text-secondary">
+                      {purpose.description}
                     </p>
                   </div>
-                </>
-              )}
 
-              {isCliProvider(latexWriterModel.provider) && (
-                <p className="text-xs text-text-muted">
-                  Uses your local {providerLabel(latexWriterModel.provider)} login.
-                  No API key or endpoint needed.
-                </p>
-              )}
+                  <Field label="Provider">
+                    <Select
+                      value={purpose.state.provider}
+                      onValueChange={(value) =>
+                        onProviderChange(purpose.key, value as AiProvider)
+                      }
+                    >
+                      <SelectTrigger className="w-full bg-bg-inset">
+                        <SelectValue placeholder="Select provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="claude-cli">
+                          Claude CLI (subscription)
+                        </SelectItem>
+                        <SelectItem value="codex-cli">
+                          Codex CLI (subscription)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field label="Model">
+                    <AiModelField
+                      provider={purpose.state.provider}
+                      model={purpose.state.model}
+                      effort={purpose.state.effort}
+                      cliModels={cliStatus?.models ?? null}
+                      onModelChange={(value, nextEffort) =>
+                        purpose.setState((prev) => ({
+                          ...prev,
+                          model: value,
+                          effort: nextEffort,
+                        }))
+                      }
+                      onEffortChange={(value) =>
+                        purpose.setState((prev) => ({
+                          ...prev,
+                          effort: value,
+                        }))
+                      }
+                    />
+                  </Field>
+
+                  {!isCliProvider(purpose.state.provider) && (
+                    <>
+                      <Field
+                        label="Endpoint URL"
+                        hint="Leave blank to use the provider default."
+                      >
+                        <input
+                          type="url"
+                          value={purpose.state.endpoint}
+                          onChange={(e) =>
+                            purpose.setState((prev) => ({
+                              ...prev,
+                              endpoint: e.target.value,
+                            }))
+                          }
+                          className="input"
+                          placeholder={
+                            purpose.state.provider === "custom"
+                              ? "https://your-host/v1"
+                              : "Optional override"
+                          }
+                        />
+                      </Field>
+
+                      <Field
+                        label="API key"
+                        hint="Saved encrypted to your account. Leave blank to keep the stored key, or to fall back to the server key if one is configured."
+                      >
+                        <PasswordInput
+                          value={purpose.state.apiKey}
+                          onChange={(e) =>
+                            purpose.setState((prev) => ({
+                              ...prev,
+                              apiKey: e.target.value,
+                            }))
+                          }
+                          className="bg-bg-inset"
+                          placeholder={
+                            purpose.state.apiKeySet
+                              ? "Stored key exists, leave blank to keep"
+                              : "sk-..."
+                          }
+                        />
+                      </Field>
+                    </>
+                  )}
+
+                  {isCliProvider(purpose.state.provider) && (
+                    <p className="flex items-start gap-2 rounded-lg bg-bg-inset px-3 py-2 text-xs text-text-secondary">
+                      <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" />
+                      <span>
+                        Uses the local{" "}
+                        {providerLabel(purpose.state.provider)} sign-in above.
+                        No API key or endpoint needed.
+                      </span>
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
 
-          <div className="rounded-lg border border-border bg-bg-secondary px-4 py-3 text-xs text-text-muted">
-            Active providers: Build Fix → {providerLabel(buildFixModel.provider)}, LaTeX
-            Writer → {providerLabel(latexWriterModel.provider)}
+          <div className="border-t border-border-subtle pt-5">
+            <button
+              type="submit"
+              disabled={aiSaving}
+              className="btn btn-primary px-4 py-2.5"
+            >
+              {aiSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {aiSaving ? "Saving" : "Save AI settings"}
+            </button>
           </div>
-
-          <button
-            type="submit"
-            disabled={aiSaving}
-            className="rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {aiSaving ? "Saving..." : "Save AI Settings"}
-          </button>
         </form>
-      </section>
+      </Section>
     </div>
   );
 }

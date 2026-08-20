@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { Link2Off as LinkIcon } from "lucide-react";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 
 interface ProjectFile {
@@ -101,10 +101,44 @@ export default function SharedEditorPage({
 
   if (loading) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-bg-primary">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-accent" />
-          <span className="text-sm text-text-muted">Loading shared project...</span>
+      <div
+        aria-busy="true"
+        className="flex h-screen w-screen flex-col overflow-hidden bg-bg-tertiary"
+      >
+        <span className="sr-only">Loading shared project</span>
+        <div className="flex h-10 shrink-0 items-center gap-3 border-b border-border bg-bg-secondary px-3">
+          <div className="h-3 w-20 animate-pulse-soft rounded bg-bg-elevated" />
+          <div className="h-3 w-28 animate-pulse-soft rounded bg-bg-elevated" />
+          <div className="ml-auto h-5 w-16 animate-pulse-soft rounded-md bg-bg-elevated" />
+        </div>
+
+        <div className="flex min-h-0 flex-1 gap-px bg-bg-tertiary">
+          {/* file tree */}
+          <div className="hidden w-56 shrink-0 flex-col gap-2.5 bg-bg-secondary p-3 sm:flex">
+            {[64, 88, 72, 96, 56, 80].map((w, i) => (
+              <div
+                key={i}
+                className="h-2.5 animate-pulse-soft rounded bg-bg-elevated"
+                style={{ width: w }}
+              />
+            ))}
+          </div>
+
+          {/* source */}
+          <div className="flex min-w-0 flex-1 flex-col gap-2.5 bg-bg-primary p-4">
+            {[70, 45, 88, 60, 78, 38, 66, 52].map((w, i) => (
+              <div
+                key={i}
+                className="h-2.5 animate-pulse-soft rounded bg-bg-elevated"
+                style={{ width: `${w}%` }}
+              />
+            ))}
+          </div>
+
+          {/* preview */}
+          <div className="hidden min-w-0 flex-1 items-start justify-center bg-bg-primary p-6 lg:flex">
+            <div className="h-full w-full max-w-[420px] animate-pulse-soft rounded-sm bg-bg-elevated" />
+          </div>
         </div>
       </div>
     );
@@ -112,20 +146,21 @@ export default function SharedEditorPage({
 
   if (error || !data) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-bg-primary">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <div className="text-4xl font-bold text-text-muted">404</div>
-          <h2 className="text-lg font-semibold text-text-primary">
-            Share link is invalid or expired
+      <div className="flex h-screen w-screen items-center justify-center bg-bg-tertiary p-6">
+        <div className="panel flex w-full max-w-sm flex-col items-start gap-3 p-6 shadow-md">
+          <span className="inline-flex items-center gap-2 font-mono text-xs text-text-muted">
+            <LinkIcon className="h-4 w-4" />
+            Share link
+          </span>
+          <h2 className="text-base font-semibold text-text-primary">
+            This link is invalid or expired
           </h2>
           <p className="text-sm text-text-secondary">
-            This public link is no longer available.
+            The owner may have turned sharing off or the link reached its expiry
+            date. Ask them for a new link.
           </p>
-          <Link
-            href="/login"
-            className="mt-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
-          >
-            Go to Login
+          <Link href="/login" className="btn btn-primary mt-1">
+            Go to login
           </Link>
         </div>
       </div>

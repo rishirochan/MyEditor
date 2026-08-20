@@ -4,6 +4,7 @@ import { resolveProjectAccess } from "@/lib/auth/project-access";
 import { parseLatexLog } from "@/lib/compiler/logParser";
 import { and, eq, desc } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 // ─── GET /api/projects/[projectId]/logs ────────────
 // Get the latest build logs with parsed error entries.
@@ -21,30 +22,38 @@ export async function GET(
     }
 
     const mainFile = request.nextUrl.searchParams.get("mainFile") ?? access.project.mainFile;
+    const requestedBuildId = request.nextUrl.searchParams.get("buildId");
+    const parsedBuildId = requestedBuildId
+      ? z.string().uuid().safeParse(requestedBuildId)
+      : null;
+    if (parsedBuildId && !parsedBuildId.success) {
+      return NextResponse.json({ error: "Invalid build ID" }, { status: 400 });
+    }
 
-    const [latestBuild] = await db
+    const [build] = await db
       .select()
       .from(builds)
       .where(
         and(
           eq(builds.projectId, projectId),
-          eq(builds.mainFile, mainFile)
+          eq(builds.mainFile, mainFile),
+          parsedBuildId?.success ? eq(builds.id, parsedBuildId.data) : undefined
         )
       )
       .orderBy(desc(builds.createdAt))
       .limit(1);
 
-    if (!latestBuild) {
+    if (!build) {
       return NextResponse.json(
         { error: "No builds found for this project" },
         { status: 404 }
       );
     }
 
-    const errors = parseLatexLog(latestBuild.logs ?? "");
+    const errors = parseLatexLog(build.logs ?? "");
 
     return NextResponse.json({
-      build: latestBuild,
+      build,
       errors,
     });
   } catch (error) {

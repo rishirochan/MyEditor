@@ -299,6 +299,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (applied.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            skipped.length > 0
+              ? "AI could not apply a valid fix."
+              : "AI did not propose a file change.",
+          explanation: aiResult.data.explanation,
+          appliedEdits: applied,
+          skippedEdits: skipped,
+        },
+        { status: 422 }
+      );
+    }
+
     const compile = await triggerCompileViaExistingApi(request, projectId, mainFile);
 
     return NextResponse.json(

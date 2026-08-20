@@ -13,17 +13,28 @@ import {
 import {
   Plus,
   FileText,
-  Clock,
+  File,
+  Newspaper,
+  GraduationCap,
+  Presentation,
+  Mail,
   Trash2,
   Pencil,
   MoreVertical,
   X,
+  Check,
   Loader2,
   Filter,
   Tag,
-  Lock,
   Globe2,
+  Users,
   Search,
+  CheckCircle2,
+  AlertCircle,
+  CircleSlash,
+  CircleDashed,
+  Clock3,
+  type LucideIcon,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────
@@ -93,38 +104,237 @@ function formatRelativeDate(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-function buildStatusColor(status: string | null): string {
-  switch (status) {
-    case "success":
-      return "bg-success";
-    case "error":
-      return "bg-error";
-    case "canceled":
-      return "bg-text-muted";
-    case "compiling":
-    case "queued":
-      return "bg-warning";
-    default:
-      return "bg-text-muted";
-  }
+/** Build state is never carried by hue alone: icon + label always ship together. */
+const BUILD_STATUS: Record<
+  string,
+  { label: string; Icon: LucideIcon; tone: string; spin?: boolean }
+> = {
+  success: { label: "Built", Icon: CheckCircle2, tone: "text-success" },
+  error: { label: "Build failed", Icon: AlertCircle, tone: "text-error" },
+  canceled: { label: "Build canceled", Icon: CircleSlash, tone: "text-text-muted" },
+  compiling: { label: "Compiling", Icon: Loader2, tone: "text-warning", spin: true },
+  queued: { label: "Queued", Icon: Clock3, tone: "text-warning" },
+};
+
+const NEVER_BUILT = {
+  label: "Never built",
+  Icon: CircleDashed,
+  tone: "text-text-muted",
+  spin: false,
+};
+
+function buildStatus(status: string | null) {
+  return (status && BUILD_STATUS[status]) || NEVER_BUILT;
 }
 
-function buildStatusLabel(status: string | null): string {
-  switch (status) {
-    case "success":
-      return "Built successfully";
-    case "error":
-      return "Build failed";
-    case "canceled":
-      return "Build canceled";
-    case "compiling":
-      return "Compiling";
-    case "queued":
-      return "Queued";
-    default:
-      return "No builds";
-  }
+function BuildStatus({ status }: { status: string | null }) {
+  const { label, Icon, tone, spin } = buildStatus(status);
+  return (
+    <span className={cn("inline-flex items-center gap-1.5", tone)}>
+      <Icon className={cn("h-3.5 w-3.5 shrink-0", spin && "animate-spin")} />
+      {label}
+    </span>
+  );
 }
+
+const TEMPLATES: {
+  value: Template;
+  name: string;
+  hint: string;
+  Icon: LucideIcon;
+  wide?: boolean;
+}[] = [
+  {
+    value: "blank",
+    name: "Blank",
+    hint: "One empty .tex file. Bring your own preamble.",
+    Icon: File,
+    wide: true,
+  },
+  {
+    value: "article",
+    name: "Article",
+    hint: "Title, abstract, sections, bibliography.",
+    Icon: Newspaper,
+  },
+  {
+    value: "thesis",
+    name: "Thesis",
+    hint: "Front matter, chapters, appendices.",
+    Icon: GraduationCap,
+  },
+  {
+    value: "beamer",
+    name: "Beamer",
+    hint: "Slide deck built from frames.",
+    Icon: Presentation,
+  },
+  {
+    value: "letter",
+    name: "Letter",
+    hint: "Sender block, recipient, signature.",
+    Icon: Mail,
+  },
+];
+
+// ─── Chips ──────────────────────────────────────────
+
+function Chip({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-md border border-border-subtle bg-bg-inset px-1.5 py-0.5 text-[11px] font-medium text-text-secondary",
+        className
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Private is the default, so it says nothing. Only sharing is worth a chip. */
+function SharingChip({
+  anyoneShared,
+  sharedWithCount,
+}: {
+  anyoneShared: boolean;
+  sharedWithCount: number;
+}) {
+  if (!anyoneShared && sharedWithCount === 0) return null;
+
+  if (anyoneShared) {
+    return (
+      <Chip>
+        <Globe2 className="h-3 w-3" />
+        {sharedWithCount > 0 ? `Public, ${sharedWithCount} invited` : "Public"}
+      </Chip>
+    );
+  }
+
+  return (
+    <Chip>
+      <Users className="h-3 w-3" />
+      {`Shared with ${sharedWithCount}`}
+    </Chip>
+  );
+}
+
+function LabelChips({ labels }: { labels: Label[] }) {
+  if (labels.length === 0) return null;
+  const shown = labels.slice(0, 3);
+
+  return (
+    <>
+      {shown.map((label) => (
+        <Chip key={label.id}>
+          <Tag className="h-3 w-3 text-text-muted" />
+          {label.name}
+        </Chip>
+      ))}
+      {labels.length > shown.length && (
+        <span className="text-[11px] text-text-muted tabular-nums">
+          +{labels.length - shown.length}
+        </span>
+      )}
+    </>
+  );
+}
+
+// ─── Dialog frame ───────────────────────────────────
+// One scrim, one panel, one header, one footer, for all four dialogs.
+
+interface DialogFrameProps {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  description?: string;
+  size?: "sm" | "md";
+  children: React.ReactNode;
+}
+
+function DialogFrame({
+  open,
+  onClose,
+  title,
+  description,
+  size = "md",
+  children,
+}: DialogFrameProps) {
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 animate-fade-in bg-overlay"
+        onClick={onClose}
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={cn(
+          "relative z-10 flex max-h-[calc(100vh-4rem)] w-full animate-slide-up flex-col overflow-hidden",
+          "rounded-xl border border-border bg-bg-elevated shadow-xl",
+          size === "sm" ? "max-w-sm" : "max-w-lg"
+        )}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-border-subtle px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-text-primary">{title}</h2>
+            {description && (
+              <p className="mt-1 text-sm text-text-muted">{description}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="btn btn-ghost -mt-1 -mr-1.5 h-7 w-7 shrink-0 p-0"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function DialogError({ message }: { message: string }) {
+  return (
+    <div className="mb-4 flex items-start gap-2 rounded-lg bg-error-subtle px-3 py-2.5 text-sm text-error">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function DialogFooter({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-end gap-2 border-t border-border-subtle px-5 py-3.5">
+      {children}
+    </div>
+  );
+}
+
+// ─── Label picker ───────────────────────────────────
 
 interface LabelPickerProps {
   inputId: string;
@@ -256,32 +466,35 @@ function LabelPicker({
                   handleAddFromInput();
                 }
               }}
-              placeholder="Search existing labels or add a new one"
-              className="w-full rounded-lg border border-border bg-bg-secondary py-2 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+              placeholder="Find a label or type a new one"
+              className="input pl-9"
             />
           </div>
           <button
             type="button"
             onClick={handleAddFromInput}
             disabled={!normalizedQuery || selectedNameSet.has(normalizedQueryLower)}
-            className="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn btn-secondary py-2"
           >
             Add
           </button>
         </div>
 
         {open && (matchingLabels.length > 0 || canCreateFromQuery) && (
-          <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-lg border border-border bg-bg-secondary shadow-lg">
+          <div className="absolute right-0 left-0 z-20 mt-1.5 overflow-hidden rounded-lg border border-border bg-bg-elevated p-1 shadow-lg">
             {matchingLabels.map((label) => (
               <button
                 key={`LABEL_SUGGESTION__${label.id}`}
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => addLabel({ id: label.id, name: label.name })}
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+                className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm text-text-secondary transition-colors hover:bg-bg-inset hover:text-text-primary"
               >
-                <span>{label.name}</span>
-                <span className="text-xs text-text-muted">existing</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <Tag className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+                  <span className="truncate">{label.name}</span>
+                </span>
+                <span className="shrink-0 text-[11px] text-text-muted">existing</span>
               </button>
             ))}
             {canCreateFromQuery && (
@@ -289,56 +502,137 @@ function LabelPicker({
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => addLabel({ name: normalizedQuery })}
-                className="flex w-full items-center justify-between border-t border-border px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+                className="mt-1 flex w-full items-center justify-between gap-3 rounded-md border-t border-border-subtle px-2 py-1.5 text-left text-sm text-text-secondary transition-colors hover:bg-bg-inset hover:text-text-primary"
               >
-                <span>Create “{normalizedQuery}”</span>
-                <span className="text-xs text-text-muted">new</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <Plus className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+                  <span className="truncate">Create “{normalizedQuery}”</span>
+                </span>
+                <span className="shrink-0 text-[11px] text-text-muted">new</span>
               </button>
             )}
           </div>
         )}
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 pt-1">
         {selectedLabels.length === 0 && (
-          <span className="text-xs text-text-muted">No labels selected.</span>
+          <span className="text-xs text-text-muted">
+            No labels yet. Labels group projects on the dashboard.
+          </span>
         )}
         {selectedLabels.map((label, index) => (
-          <span
-            key={`SELECTED_LABEL__${label.id ?? label.name}__${index}`}
-            className="inline-flex items-center rounded-full bg-bg-elevated px-2.5 py-0.5 text-xs font-medium text-text-secondary"
-          >
+          <Chip key={`SELECTED_LABEL__${label.id ?? label.name}__${index}`} className="pr-1">
             {label.name}
             <button
               type="button"
               onClick={() => removeLabel(index)}
-              className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-secondary hover:text-text-primary"
+              aria-label={`Remove label ${label.name}`}
+              className="inline-flex h-4 w-4 items-center justify-center rounded text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
             >
               <X className="h-3 w-3" />
             </button>
-          </span>
+          </Chip>
         ))}
       </div>
     </div>
   );
 }
 
-// ─── Skeleton Card ──────────────────────────────────
+// ─── Template picker ────────────────────────────────
 
-function SkeletonCard() {
+function TemplatePicker({
+  value,
+  onChange,
+}: {
+  value: Template;
+  onChange: (next: Template) => void;
+}) {
   return (
-    <div className="rounded-lg border border-border bg-bg-secondary p-5 animate-pulse">
-      <div className="flex items-start justify-between">
-        <div className="h-5 w-40 rounded bg-bg-elevated" />
-        <div className="h-5 w-5 rounded bg-bg-elevated" />
-      </div>
-      <div className="mt-3 h-4 w-full rounded bg-bg-elevated" />
-      <div className="mt-1 h-4 w-3/4 rounded bg-bg-elevated" />
-      <div className="mt-4 flex items-center gap-4">
-        <div className="h-5 w-16 rounded-full bg-bg-elevated" />
-        <div className="h-4 w-20 rounded bg-bg-elevated" />
-        <div className="h-4 w-24 rounded bg-bg-elevated" />
-      </div>
+    <div role="radiogroup" aria-label="Template" className="grid gap-2 sm:grid-cols-2">
+      {TEMPLATES.map(({ value: templateValue, name, hint, Icon, wide }) => {
+        const selected = templateValue === value;
+
+        return (
+          <button
+            key={templateValue}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(templateValue)}
+            className={cn(
+              "flex items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150",
+              wide && "sm:col-span-2",
+              selected
+                ? "border-accent-muted bg-accent-subtle"
+                : "border-border bg-bg-inset hover:border-border-strong"
+            )}
+          >
+            <Icon
+              className={cn(
+                "mt-0.5 h-4 w-4 shrink-0",
+                selected ? "text-accent" : "text-text-muted"
+              )}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-text-primary">
+                {name}
+              </span>
+              <span className="mt-0.5 block text-xs text-text-muted">{hint}</span>
+            </span>
+            {selected && <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Field ──────────────────────────────────────────
+
+function Field({
+  htmlFor,
+  label,
+  optional,
+  children,
+}: {
+  htmlFor: string;
+  label: string;
+  optional?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label
+        htmlFor={htmlFor}
+        className="mb-1.5 block text-sm font-medium text-text-secondary"
+      >
+        {label}
+        {optional && (
+          <span className="ml-1.5 text-xs font-normal text-text-muted">optional</span>
+        )}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+// ─── Loading skeleton ───────────────────────────────
+
+const SKELETON_WIDTHS = ["w-52", "w-40", "w-64", "w-44", "w-56"];
+
+function SkeletonList() {
+  return (
+    <div className="panel divide-y divide-border-subtle overflow-hidden">
+      {SKELETON_WIDTHS.map((width, i) => (
+        <div key={i} className="flex animate-pulse-soft items-start gap-4 px-4 py-3.5">
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className={cn("h-4 rounded bg-bg-elevated", width)} />
+            <div className="h-3 w-28 rounded bg-bg-elevated" />
+          </div>
+          <div className="h-3 w-14 shrink-0 rounded bg-bg-elevated" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -384,7 +678,7 @@ function NewProjectDialog({ open, defaultLabels, onClose, onCreated }: NewProjec
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || "Failed to create project");
+        setError(data.error || "The project could not be created.");
         return;
       }
 
@@ -404,122 +698,59 @@ function NewProjectDialog({ open, defaultLabels, onClose, onCreated }: NewProjec
       onCreated();
       onClose();
     } catch {
-      setError("Something went wrong. Please try again.");
+      setError("The server did not respond. Check that MyEditor is running, then try again.");
     } finally {
       setCreating(false);
     }
   }
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <DialogFrame
+      open={open}
+      onClose={onClose}
+      title="New project"
+      description="A project is one document: its .tex sources, its build settings, and its PDF output."
+    >
+      <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {error && <DialogError message={error} />}
 
-      {/* Dialog */}
-      <div className="relative z-10 w-full max-w-lg rounded-lg border border-border bg-bg-primary p-6 shadow-xl">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-text-primary">
-            New Project
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {error && (
-          <div className="mb-4 rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Name */}
-          <div>
-            <label
-              htmlFor="project-name"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Project name
-            </label>
+          <Field htmlFor="project-name" label="Project name">
             <input
               id="project-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              placeholder="My LaTeX Document"
-              className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+              placeholder="Thesis chapter 3"
+              className="input"
             />
-          </div>
+          </Field>
 
-          {/* Description */}
-          <div>
-            <label
-              htmlFor="project-description"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Description
-              <span className="ml-1 text-text-muted font-normal">
-                (optional)
-              </span>
-            </label>
+          <Field htmlFor="project-description" label="Description" optional>
             <textarea
               id="project-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="A brief description of your project"
-              rows={3}
-              className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent resize-none"
+              placeholder="What this document is, so future you knows"
+              rows={2}
+              className="input resize-none"
             />
+          </Field>
+
+          <div>
+            <span className="mb-1.5 block text-sm font-medium text-text-secondary">
+              Template
+            </span>
+            <TemplatePicker value={template} onChange={setTemplate} />
           </div>
 
-          {/* Template */}
-          <div>
-            <label
-              htmlFor="project-template"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Template
-            </label>
-            <Select
-              value={template}
-              onValueChange={(value) => setTemplate(value as Template)}
-            >
-              <SelectTrigger id="project-template" className="w-full">
-                <SelectValue placeholder="Select template" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="blank">Blank</SelectItem>
-                <SelectItem value="article">Article</SelectItem>
-                <SelectItem value="thesis">Thesis</SelectItem>
-                <SelectItem value="beamer">Beamer (Presentation)</SelectItem>
-                <SelectItem value="letter">Letter</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          
-          {/* Engine */}
-          <div>
-            <label
-              htmlFor="project-engine"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Engine
-            </label>
+          <Field htmlFor="project-engine" label="Engine">
             <Select
               value={engine}
               onValueChange={(value) => setEngine(value as EngineOption)}
             >
-              <SelectTrigger id="project-engine" className="w-full">
+              <SelectTrigger id="project-engine" className="w-full bg-bg-inset">
                 <SelectValue placeholder="Select engine" />
               </SelectTrigger>
               <SelectContent>
@@ -530,51 +761,36 @@ function NewProjectDialog({ open, defaultLabels, onClose, onCreated }: NewProjec
                 <SelectItem value="latex">LaTeX (DVI)</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+            <p className="mt-1.5 text-xs text-text-muted">
+              Auto-detect reads the preamble. You can change this later in project settings.
+            </p>
+          </Field>
 
-          {/* Labels */}
-          <div>
-              <label
-                htmlFor="labels"
-                className="mb-1.5 block text-sm font-medium text-text-secondary"
-              >
-                Labels
-              </label>
-              <LabelPicker
-                inputId="labels"
-                selectedLabels={labels}
-                defaultLabels={defaultLabels}
-                onChange={setLabels}
-              />
-          </div>
+          <Field htmlFor="labels" label="Labels" optional>
+            <LabelPicker
+              inputId="labels"
+              selectedLabels={labels}
+              defaultLabels={defaultLabels}
+              onChange={setLabels}
+            />
+          </Field>
+        </div>
 
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-border bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-border"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={creating || !name.trim()}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {creating ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Creating...
-                </span>
-              ) : (
-                "Create Project"
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <DialogFooter>
+          <button type="button" onClick={onClose} className="btn btn-ghost px-3 py-2">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={creating || !name.trim()}
+            className="btn btn-primary px-4 py-2"
+          >
+            {creating && <Loader2 className="h-4 w-4 animate-spin" />}
+            {creating ? "Creating" : "Create project"}
+          </button>
+        </DialogFooter>
+      </form>
+    </DialogFrame>
   );
 }
 
@@ -595,50 +811,45 @@ function DeleteDialog({
   onConfirm,
   deleting,
 }: DeleteDialogProps) {
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-bg-primary p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-text-primary">
-          Delete Project
-        </h2>
-        <p className="mt-2 text-sm text-text-secondary">
-          Are you sure you want to delete{" "}
-          <span className="font-medium text-text-primary">{projectName}</span>?
-          This action cannot be undone.
+    <DialogFrame open={open} onClose={onClose} title="Delete project" size="sm">
+      <div className="px-5 py-4">
+        <p className="text-sm text-text-secondary">
+          <span className="font-medium text-text-primary">{projectName}</span> and
+          every file in it will be removed. Compiled PDFs and build history go with
+          it. This cannot be undone.
         </p>
-        <div className="mt-6 flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={deleting}
-            className="rounded-lg border border-border bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-border disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={deleting}
-            className="rounded-lg bg-error px-4 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-error/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {deleting ? (
-              <span className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Deleting...
-              </span>
-            ) : (
-              "Delete"
-            )}
-          </button>
-        </div>
       </div>
-    </div>
+
+      <DialogFooter>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={deleting}
+          className="btn btn-ghost px-3 py-2"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={deleting}
+          className="btn btn-danger px-4 py-2"
+        >
+          {deleting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Deleting
+            </>
+          ) : (
+            <>
+              <Trash2 className="h-4 w-4" />
+              Delete project
+            </>
+          )}
+        </button>
+      </DialogFooter>
+    </DialogFrame>
   );
 }
 
@@ -689,7 +900,7 @@ function EditProjectDialog({
 
       if (!updateRes.ok) {
         const payload = await updateRes.json().catch(() => ({}));
-        setError(payload.error || "Failed to update project");
+        setError(payload.error || "The project could not be updated.");
         return;
       }
 
@@ -738,47 +949,21 @@ function EditProjectDialog({
       onUpdated();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update project");
+      setError(err instanceof Error ? err.message : "The project could not be updated.");
     } finally {
       setSaving(false);
     }
   }
 
-  if (!open || !project) return null;
+  if (!project) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <DialogFrame open={open} onClose={onClose} title="Project details">
+      <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {error && <DialogError message={error} />}
 
-      <div className="relative z-10 w-full max-w-lg rounded-lg border border-border bg-bg-primary p-6 shadow-xl">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-text-primary">Edit Project</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {error && (
-          <div className="mb-4 rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label
-              htmlFor="edit-project-name"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Project name
-            </label>
+          <Field htmlFor="edit-project-name" label="Project name">
             <input
               id="edit-project-name"
               type="text"
@@ -786,71 +971,46 @@ function EditProjectDialog({
               onChange={(e) => setName(e.target.value)}
               required
               maxLength={255}
-              className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+              className="input"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label
-              htmlFor="edit-project-description"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Description
-              <span className="ml-1 text-text-muted font-normal">
-                (optional)
-              </span>
-            </label>
+          <Field htmlFor="edit-project-description" label="Description" optional>
             <textarea
               id="edit-project-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              placeholder="A brief description of your project"
-              className="w-full resize-none rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+              rows={2}
+              placeholder="What this document is, so future you knows"
+              className="input resize-none"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label
-              htmlFor="edit-project-labels"
-              className="mb-1.5 block text-sm font-medium text-text-secondary"
-            >
-              Labels
-            </label>
+          <Field htmlFor="edit-project-labels" label="Labels" optional>
             <LabelPicker
               inputId="edit-project-labels"
               selectedLabels={labels}
               defaultLabels={defaultLabels}
               onChange={setLabels}
             />
-          </div>
+          </Field>
+        </div>
 
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-border bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-border"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving || !name.trim()}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Saving...
-                </span>
-              ) : (
-                "Save Changes"
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <DialogFooter>
+          <button type="button" onClick={onClose} className="btn btn-ghost px-3 py-2">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving || !name.trim()}
+            className="btn btn-primary px-4 py-2"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {saving ? "Saving" : "Save changes"}
+          </button>
+        </DialogFooter>
+      </form>
+    </DialogFrame>
   );
 }
 
@@ -878,8 +1038,6 @@ function FilterLabelsDialog({
     setSelectedLabels(filteredLabels);
   }, [filteredLabels, open]);
 
-  if (!open) return null;
-
   const toggleLabel = (label: Label) => {
     setSelectedLabels((prev) => {
       const exists = prev.some((l) => l.id === label.id);
@@ -892,77 +1050,79 @@ function FilterLabelsDialog({
     selectedLabels.some((l) => l.id === label.id);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <DialogFrame
+      open={open}
+      onClose={onClose}
+      title="Filter by label"
+      description="A project has to carry every label you pick."
+      size="sm"
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {labels.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-text-muted">
+            You have no labels yet. Add one while creating or editing a project.
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {labels.map((label) => {
+              const selected = isSelected(label);
 
-      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-bg-primary p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-text-primary">
-          Filter Labels
-        </h2>
-
-        <p className="mt-1 text-sm text-text-muted">
-          Select one or more labels to filter projects.
-        </p>
-
-        <div className="mt-4 max-h-72 overflow-y-auto pr-1">
-          {labels.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border bg-bg-secondary/50 px-3 py-6 text-center text-sm text-text-muted">
-              No labels available.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {labels.map((label) => {
-                const selected = isSelected(label);
-
-                return (
-                  <button
-                    key={label.id}
-                    type="button"
-                    onClick={() => toggleLabel(label)}
-                    className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition-colors ${
-                      selected
-                        ? "border-accent bg-accent/20 text-text-primary"
-                        : "border-border bg-bg-primary text-text-secondary hover:bg-bg-secondary"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Tag className="h-4 w-4"/>
-                      <span>{label.name}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-
-        <div className="mt-5 flex gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 rounded-lg border border-border bg-bg-primary px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-secondary"
-          >
-            Cancel
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onSubmit(selectedLabels)}
-            className="flex-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
-          >
-            Apply
-          </button>
-        </div>
+              return (
+                <button
+                  key={label.id}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={selected}
+                  onClick={() => toggleLabel(label)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors duration-150",
+                    selected
+                      ? "border-accent-muted bg-accent-subtle text-text-primary"
+                      : "border-border bg-bg-inset text-text-secondary hover:border-border-strong hover:text-text-primary"
+                  )}
+                >
+                  <Tag
+                    className={cn(
+                      "h-3.5 w-3.5 shrink-0",
+                      selected ? "text-accent" : "text-text-muted"
+                    )}
+                  />
+                  <span className="min-w-0 flex-1 truncate font-medium">
+                    {label.name}
+                  </span>
+                  {selected && <Check className="h-4 w-4 shrink-0 text-accent" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
-    </div>
+
+      <DialogFooter>
+        <button
+          type="button"
+          onClick={() => setSelectedLabels([])}
+          disabled={selectedLabels.length === 0}
+          className="btn btn-ghost mr-auto px-3 py-2"
+        >
+          Clear selection
+        </button>
+        <button type="button" onClick={onClose} className="btn btn-ghost px-3 py-2">
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => onSubmit(selectedLabels)}
+          className="btn btn-primary px-4 py-2"
+        >
+          Apply filter
+        </button>
+      </DialogFooter>
+    </DialogFrame>
   );
 }
 
-// ─── Project Card Menu ──────────────────────────────
+// ─── Project row menu ───────────────────────────────
 
 interface CardMenuProps {
   onEdit: () => void;
@@ -982,12 +1142,17 @@ function CardMenu({ onEdit, onDelete }: CardMenuProps) {
     >
       <button
         type="button"
+        aria-label="Project actions"
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setOpen(!open);
         }}
-        className="rounded-md p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+        className={cn(
+          "btn btn-ghost h-7 w-7 rounded-md p-0 text-text-muted",
+          "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100",
+          open && "bg-bg-inset text-text-primary opacity-100"
+        )}
       >
         <MoreVertical className="h-4 w-4" />
       </button>
@@ -1002,7 +1167,7 @@ function CardMenu({ onEdit, onDelete }: CardMenuProps) {
               setOpen(false);
             }}
           />
-          <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-lg border border-border bg-bg-secondary py-1 shadow-lg">
+          <div className="absolute right-0 top-full z-20 mt-1 min-w-[150px] rounded-lg border border-border bg-bg-elevated p-1 shadow-lg">
             <button
               type="button"
               onClick={(e) => {
@@ -1011,10 +1176,10 @@ function CardMenu({ onEdit, onDelete }: CardMenuProps) {
                 setOpen(false);
                 onEdit();
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-bg-elevated"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-inset hover:text-text-primary"
             >
-              <Pencil className="h-4 w-4" />
-              Edit
+              <Pencil className="h-3.5 w-3.5" />
+              Rename
             </button>
             <button
               type="button"
@@ -1024,15 +1189,37 @@ function CardMenu({ onEdit, onDelete }: CardMenuProps) {
                 setOpen(false);
                 onDelete();
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-error transition-colors hover:bg-bg-elevated"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-error transition-colors hover:bg-error-subtle"
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-3.5 w-3.5" />
               Delete
             </button>
           </div>
         </>
       )}
     </div>
+  );
+}
+
+// ─── Project rows ───────────────────────────────────
+
+function ProjectMeta({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+      {children}
+    </div>
+  );
+}
+
+function UpdatedAt({ value }: { value: string }) {
+  return (
+    <time
+      dateTime={value}
+      title={new Date(value).toLocaleString()}
+      className="mt-0.5 w-20 shrink-0 text-right text-xs text-text-muted tabular-nums"
+    >
+      {formatRelativeDate(value)}
+    </time>
   );
 }
 
@@ -1126,258 +1313,255 @@ export default function DashboardPage() {
     );
   }, [filteredLabels, projects]);
 
+  const filterActive = filteredLabels.length > 0;
+
   return (
     <>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      {/* Page header */}
+      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">My Projects</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Manage your LaTeX documents
+          <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
+            Projects
+          </h1>
+          <p className="mt-1.5 text-sm text-text-secondary">
+            Everything you write, plus what others have shared with you.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-          type="button"
-          onClick={() => setShowFilterDialog(true)}
-          className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
-        >
-          <Filter className="h-4 w-4" />
-          
-          {filteredLabels.length > 0 && (<span>Filter Labels ({filteredLabels.length})</span>)}
-          {filteredLabels.length === 0 && (<span>Filter Labels</span>)}
-        </button>
         <button
           type="button"
           onClick={() => setShowNewDialog(true)}
-          className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
+          className="btn btn-primary px-4 py-2"
         >
           <Plus className="h-4 w-4" />
-          New Project
+          New project
         </button>
-        </div>
-      </div>
+      </header>
 
-      {/* Loading state */}
-      {loading && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <SkeletonCard key={i} />
-          ))}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && projects.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-bg-secondary/50 px-6 py-16">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-bg-elevated">
-            <FileText className="h-7 w-7 text-text-muted" />
-          </div>
-          <h3 className="mt-4 text-lg font-medium text-text-primary">
-            No projects yet
-          </h3>
-          <p className="mt-1 text-sm text-text-secondary">
-            Create your first project to get started.
-          </p>
+      {/* Toolbar: quiet until a filter is on */}
+      {(labels.length > 0 || filterActive) && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setShowNewDialog(true)}
-            className="mt-6 flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
+            onClick={() => setShowFilterDialog(true)}
+            className={cn(
+              "btn py-1.5",
+              filterActive
+                ? "border border-accent-muted bg-accent-subtle text-accent"
+                : "btn-ghost"
+            )}
           >
-            <Plus className="h-4 w-4" />
-            New Project
+            <Filter className="h-3.5 w-3.5" />
+            {filterActive ? `Filtered by ${filteredLabels.length}` : "Filter"}
           </button>
+
+          {filterActive && (
+            <>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {filteredLabels.map((label) => (
+                  <Chip key={label.id}>
+                    <Tag className="h-3 w-3 text-text-muted" />
+                    {label.name}
+                  </Chip>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setFilteredLabels([])}
+                className="btn btn-ghost py-1.5 text-xs"
+              >
+                <X className="h-3.5 w-3.5" />
+                Clear
+              </button>
+            </>
+          )}
+
+          {!loading && projects.length > 0 && (
+            <span className="ml-auto text-xs text-text-muted tabular-nums">
+              {filterActive
+                ? `${filteredProjects.length} of ${projects.length}`
+                : `${projects.length} ${projects.length === 1 ? "project" : "projects"}`}
+            </span>
+          )}
         </div>
       )}
 
-      {/* Project Grid */}
-      {!loading && filteredProjects.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredProjects.map((project) => (
-            <Link
-              key={project.id}
-              href={`/editor/${project.id}`}
-              className="group rounded-lg border border-border bg-bg-secondary p-5 transition-colors hover:bg-bg-elevated/50 hover:border-accent/30"
+      {/* Loading */}
+      {loading && <SkeletonList />}
+
+      {/* First run: teach what a project is */}
+      {!loading && projects.length === 0 && (
+        <div className="panel px-6 py-12 sm:px-10">
+          <div className="max-w-xl">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-accent-muted bg-accent-subtle">
+              <FileText className="h-5 w-5 text-accent" />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-text-primary">
+              Write your first document
+            </h2>
+            <p className="mt-2 text-sm text-text-secondary">
+              A project holds one document: its .tex sources, any figures it needs,
+              and the engine it compiles with. Open one and you get the editor, a
+              live PDF preview, and the build log side by side.
+            </p>
+            <p className="mt-3 text-sm text-text-secondary">
+              Start from Blank if you already have a preamble, or pick a template
+              that is close to what you are writing:
+            </p>
+            <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+              {TEMPLATES.map(({ value, name, Icon }) => (
+                <li
+                  key={value}
+                  className="inline-flex items-center gap-1.5 text-xs text-text-muted"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {name}
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => setShowNewDialog(true)}
+              className="btn btn-primary mt-6 px-4 py-2"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  <FileText className="h-4 w-4 shrink-0 text-accent" />
-                  <h3 className="truncate text-sm font-semibold text-text-primary group-hover:text-accent">
-                    {project.name}
-                  </h3>
+              <Plus className="h-4 w-4" />
+              New project
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Project list */}
+      {!loading && filteredProjects.length > 0 && (
+        <ul className="panel divide-y divide-border-subtle overflow-hidden">
+          {filteredProjects.map((project) => (
+            <li key={project.id} className="group relative">
+              <Link
+                href={`/editor/${project.id}`}
+                className="flex items-start gap-4 py-3 pr-11 pl-4 transition-colors duration-150 hover:bg-bg-elevated"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate text-sm font-medium text-text-primary transition-colors group-hover:text-accent">
+                      {project.name}
+                    </h3>
+                    <SharingChip
+                      anyoneShared={project.anyoneShared}
+                      sharedWithCount={project.sharedWithCount}
+                    />
+                    <LabelChips labels={project.labels} />
+                  </div>
+
+                  {project.description && (
+                    <p className="mt-1 line-clamp-1 text-xs text-text-secondary">
+                      {project.description}
+                    </p>
+                  )}
+
+                  <ProjectMeta>
+                    <BuildStatus status={project.lastBuildStatus} />
+                    <span className="font-mono">{project.engine}</span>
+                  </ProjectMeta>
                 </div>
+
+                <UpdatedAt value={project.updatedAt} />
+              </Link>
+
+              <div className="absolute top-3 right-2">
                 <CardMenu
                   onEdit={() => setEditTarget(project)}
                   onDelete={() => setDeleteTarget(project)}
                 />
               </div>
-
-              {project.description && (
-                <p className="mt-2 line-clamp-2 text-sm text-text-secondary">
-                  {project.description}
-                </p>
-              )}
-
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                {/* Engine badge */}
-                <span className="inline-flex items-center rounded-full bg-bg-elevated px-2.5 py-0.5 text-xs font-medium text-text-secondary">
-                  {project.engine}
-                </span>
-
-                {/* Label Badges */}
-                {project.labels.map((label) => (
-                  <span key={label.id} className="inline-flex items-center rounded-full bg-bg-elevated px-2.5 py-0.5 text-xs font-medium text-text-secondary">
-                  {label.name}
-                </span>
-                ))}
-
-
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium",
-                    project.anyoneShared || project.sharedWithCount > 0
-                      ? "border-red-500/25 bg-red-500/10 text-red-300"
-                      : "border-border bg-bg-elevated text-text-muted"
-                  )}
-                >
-                  {project.anyoneShared || project.sharedWithCount > 0 ? (
-                    <Globe2 className="h-3 w-3" />
-                  ) : (
-                    <Lock className="h-3 w-3" />
-                  )}
-                  {project.anyoneShared
-                    ? project.sharedWithCount > 0
-                      ? `Public +${project.sharedWithCount}`
-                      : "Public"
-                    : project.sharedWithCount > 0
-                      ? `Shared ${project.sharedWithCount}`
-                      : "Private"}
-                </span>
-
-                {/* Build status */}
-                <span className="inline-flex items-center gap-1.5 text-xs text-text-muted">
-                  <span
-                    className={cn(
-                      "h-2 w-2 rounded-full",
-                      buildStatusColor(project.lastBuildStatus)
-                    )}
-                    title={buildStatusLabel(project.lastBuildStatus)}
-                  />
-                  {buildStatusLabel(project.lastBuildStatus)}
-                </span>
-
-                {/* Updated date */}
-                <span className="inline-flex items-center gap-1 text-xs text-text-muted ml-auto">
-                  <Clock className="h-3 w-3" />
-                  {formatRelativeDate(project.updatedAt)}
-                </span>
-              </div>
-            </Link>
+            </li>
           ))}
+        </ul>
+      )}
+
+      {/* Filter matched nothing */}
+      {!loading && filteredProjects.length === 0 && projects.length > 0 && (
+        <div className="panel px-6 py-12 text-center">
+          <Filter className="mx-auto h-5 w-5 text-text-muted" />
+          <h2 className="mt-3 text-sm font-semibold text-text-primary">
+            No project carries all of these labels
+          </h2>
+          <p className="mx-auto mt-1.5 max-w-md text-sm text-text-secondary">
+            A project has to match every label in the filter. Drop one to widen the
+            search.
+          </p>
+          <div className="mt-5 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFilteredLabels([])}
+              className="btn btn-secondary px-3 py-2"
+            >
+              <X className="h-4 w-4" />
+              Clear filter
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowFilterDialog(true)}
+              className="btn btn-ghost px-3 py-2"
+            >
+              <Filter className="h-4 w-4" />
+              Edit filter
+            </button>
+          </div>
         </div>
       )}
 
-      {!loading && filteredProjects.length === 0 && projects.length > 0 && 
-        (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-bg-secondary/50 px-6 py-16">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-bg-elevated">
-            <Filter className="h-7 w-7 text-text-muted" />
-          </div>
-          <h3 className="mt-4 text-lg font-medium text-text-primary">
-            Your filter returned no results
-          </h3>
-          <p className="mt-1 text-sm text-text-secondary">
-            Please refine your search, or create a project which matches the selected labels.
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowFilterDialog(true)}
-            className="mt-6 flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
-          >
-            <Filter className="h-4 w-4" />
-            Filter Labels
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowNewDialog(true)}
-            className="mt-6 flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
-          >
-            <Plus className="h-4 w-4" />
-            New Project
-          </button>
-          </div>
-        )
-      }
-
-      {/* Shared with me section */}
+      {/* Shared with me */}
       {!loading && sharedProjects.length > 0 && (
-        <div className="mt-10">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-text-primary">
+        <section className="mt-10">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="text-xs font-medium tracking-wide text-text-muted uppercase">
               Shared with me
             </h2>
-            <p className="mt-0.5 text-sm text-text-secondary">
-              Projects others have shared with you
-            </p>
+            <span className="text-xs text-text-muted tabular-nums">
+              {sharedProjects.length}
+            </span>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+
+          <ul className="panel divide-y divide-border-subtle overflow-hidden">
             {sharedProjects.map((project) => (
-              <Link
-                key={project.id}
-                href={`/editor/${project.id}`}
-                className="group rounded-lg border border-border bg-bg-secondary p-5 transition-colors hover:bg-bg-elevated/50 hover:border-accent/30"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileText className="h-4 w-4 shrink-0 text-accent" />
-                    <h3 className="truncate text-sm font-semibold text-text-primary group-hover:text-accent">
-                      {project.name}
-                    </h3>
+              <li key={project.id} className="group">
+                <Link
+                  href={`/editor/${project.id}`}
+                  className="flex items-start gap-4 px-4 py-3 transition-colors duration-150 hover:bg-bg-elevated"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate text-sm font-medium text-text-primary transition-colors group-hover:text-accent">
+                        {project.name}
+                      </h3>
+                      <Chip>
+                        {project.role === "editor" ? (
+                          <Pencil className="h-3 w-3 text-text-muted" />
+                        ) : (
+                          <FileText className="h-3 w-3 text-text-muted" />
+                        )}
+                        {project.role === "editor" ? "Can edit" : "Read only"}
+                      </Chip>
+                    </div>
+
+                    {project.description && (
+                      <p className="mt-1 line-clamp-1 text-xs text-text-secondary">
+                        {project.description}
+                      </p>
+                    )}
+
+                    <ProjectMeta>
+                      <BuildStatus status={project.lastBuildStatus} />
+                      <span className="font-mono">{project.engine}</span>
+                      <span>by {project.ownerName}</span>
+                    </ProjectMeta>
                   </div>
-                  <span className="shrink-0 inline-flex items-center rounded-full bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-muted border border-border">
-                    {project.role === "editor" ? "Editor" : "Viewer"}
-                  </span>
-                </div>
 
-                {project.description && (
-                  <p className="mt-2 line-clamp-2 text-sm text-text-secondary">
-                    {project.description}
-                  </p>
-                )}
-
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  {/* Engine badge */}
-                  <span className="inline-flex items-center rounded-full bg-bg-elevated px-2.5 py-0.5 text-xs font-medium text-text-secondary">
-                    {project.engine}
-                  </span>
-
-                  {/* Owner info */}
-                  <span className="inline-flex items-center gap-1 text-xs text-text-muted">
-                    by {project.ownerName}
-                  </span>
-
-                  {/* Build status */}
-                  <span className="inline-flex items-center gap-1.5 text-xs text-text-muted">
-                    <span
-                      className={cn(
-                        "h-2 w-2 rounded-full",
-                        buildStatusColor(project.lastBuildStatus)
-                      )}
-                      title={buildStatusLabel(project.lastBuildStatus)}
-                    />
-                    {buildStatusLabel(project.lastBuildStatus)}
-                  </span>
-
-                  {/* Updated date */}
-                  <span className="inline-flex items-center gap-1 text-xs text-text-muted ml-auto">
-                    <Clock className="h-3 w-3" />
-                    {formatRelativeDate(project.updatedAt)}
-                  </span>
-                </div>
-              </Link>
+                  <UpdatedAt value={project.updatedAt} />
+                </Link>
+              </li>
             ))}
-          </div>
-        </div>
+          </ul>
+        </section>
       )}
 
       {/* Dialogs */}
@@ -1413,8 +1597,7 @@ export default function DashboardPage() {
         }}
         filteredLabels={filteredLabels}
         labels={labels}
-      >
-      </FilterLabelsDialog>
+      />
     </>
   );
 }

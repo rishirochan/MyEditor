@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Check,
   Ban,
+  Circle,
   Sparkles,
 } from "lucide-react";
 import {
@@ -61,43 +62,75 @@ interface EditorHeaderProps {
   onToggleAiPanel?: () => void;
 }
 
-// ─── Build Status Badge ────────────────────────────
+// ─── Build status ──────────────────────────────────
+
+// Status is the loudest thing in this row: it is what the user glances at
+// between edits. Icon + label always, tint second, never colour alone.
+const BUILD_STATES: Record<
+  string,
+  { label: string; Icon: typeof Circle; tone: string; spin?: boolean }
+> = {
+  success: {
+    label: "Built",
+    Icon: CheckCircle2,
+    tone: "bg-success-subtle text-success",
+  },
+  error: { label: "Failed", Icon: XCircle, tone: "bg-error-subtle text-error" },
+  timeout: {
+    label: "Timed out",
+    Icon: XCircle,
+    tone: "bg-error-subtle text-error",
+  },
+  compiling: {
+    label: "Compiling",
+    Icon: Loader2,
+    tone: "bg-warning-subtle text-warning",
+    spin: true,
+  },
+  queued: {
+    label: "Queued",
+    Icon: Loader2,
+    tone: "bg-warning-subtle text-warning",
+    spin: true,
+  },
+  canceled: {
+    label: "Canceled",
+    Icon: Ban,
+    tone: "bg-bg-elevated text-text-muted",
+  },
+};
+
+const IDLE_STATE = {
+  label: "Not built",
+  Icon: Circle,
+  tone: "bg-bg-inset text-text-muted",
+  spin: false,
+};
 
 function BuildStatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case "success":
-      return (
-        <div className="flex items-center gap-1.5 text-xs text-success">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">Built</span>
-        </div>
-      );
-    case "error":
-    case "timeout":
-      return (
-        <div className="flex items-center gap-1.5 text-xs text-error">
-          <XCircle className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">Failed</span>
-        </div>
-      );
-    case "compiling":
-    case "queued":
-      return (
-        <div className="flex items-center gap-1.5 text-xs text-warning">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span className="hidden md:inline">Building</span>
-        </div>
-      );
-    case "canceled":
-      return (
-        <div className="flex items-center gap-1.5 text-xs text-text-muted">
-          <Ban className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">Canceled</span>
-        </div>
-      );
-    default:
-      return null;
-  }
+  // Unknown states (offline, anything the server adds later) still get a
+  // label rather than disappearing from the row.
+  const state =
+    BUILD_STATES[status] ??
+    (status && status !== "idle"
+      ? { ...IDLE_STATE, label: status.charAt(0).toUpperCase() + status.slice(1) }
+      : IDLE_STATE);
+  const { label, Icon, tone, spin } = state;
+
+  return (
+    <div
+      aria-live="polite"
+      className={cn(
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2",
+        "text-xs font-medium transition-colors duration-200 ease-out",
+        tone
+      )}
+    >
+      <Icon className={cn("h-3.5 w-3.5 shrink-0", spin && "animate-spin")} />
+      <span className="hidden sm:inline">{label}</span>
+      <span className="sr-only sm:hidden">{label}</span>
+    </div>
+  );
 }
 
 // ─── Small build status dot for dropdown items ─────
@@ -109,10 +142,13 @@ function BuildStatusDot({ status }: { status: string | null }) {
       ? "bg-success"
       : status === "error" || status === "timeout"
         ? "bg-error"
-        : status === "canceled"
-          ? "bg-text-muted"
         : "bg-text-muted";
-  return <span className={cn("inline-block h-2 w-2 rounded-full shrink-0", color)} />;
+  return (
+    <span
+      title={status}
+      className={cn("inline-block h-2 w-2 shrink-0 rounded-full", color)}
+    />
+  );
 }
 
 // ─── EditorHeader ──────────────────────────────────
@@ -142,6 +178,8 @@ export function EditorHeader({
   const [sharedProjects, setSharedProjects] = useState<ProjectListItem[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
 
+  const hasOtherUsers = presenceUsers.some((u) => u.userId !== currentUserId);
+
   async function fetchProjects() {
     setLoadingProjects(true);
     try {
@@ -159,14 +197,14 @@ export function EditorHeader({
 
   const projectSwitcher = shareToken ? (
     <>
-      <div className="h-4 w-px bg-border shrink-0" />
+      <div className="h-4 w-px shrink-0 bg-border-subtle" />
       <span className="max-w-[220px] truncate text-sm font-medium text-text-primary">
         {projectName}
       </span>
     </>
   ) : (
     <>
-      <div className="h-4 w-px bg-border shrink-0" />
+      <div className="h-4 w-px shrink-0 bg-border-subtle" />
       <DropdownMenu
         onOpenChange={(open) => {
           if (open) fetchProjects();
@@ -242,101 +280,111 @@ export function EditorHeader({
   );
 
   return (
-    <>
     <AppHeader leftContent={projectSwitcher}>
       {/* Compilation progress bar */}
       {(buildStatus === "compiling" || buildStatus === "queued") && (
-        <div className="absolute top-0 left-0 right-0 overflow-hidden">
+        <div className="absolute top-0 right-0 left-0 overflow-hidden">
           <div className="compilation-progress w-full" />
         </div>
       )}
 
-      {/* Compile button + auto-compile toggle (hidden for viewers) */}
-      {canEdit && (
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={onCompile}
-                disabled={compiling || !documentPath}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg px-3 py-1 text-sm font-medium transition-colors",
-                  compiling || !documentPath
-                    ? "bg-accent/50 text-bg-primary cursor-not-allowed"
-                    : "bg-accent text-bg-primary hover:bg-accent-hover"
-                )}
-              >
-                {compiling ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Play className="h-3.5 w-3.5" />
-                )}
-                <span className="hidden sm:inline">
-                  {compiling ? "Compiling" : "Compile"}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>
-                {documentPath
-                  ? `Compile ${documentPath} (Ctrl+Enter)`
-                  : "Select or create a document first"}
-              </p>
-            </TooltipContent>
-          </Tooltip>
-
-          {(buildStatus === "compiling" || buildStatus === "queued") && onCancelBuild && (
+      <TooltipProvider delayDuration={300}>
+        {/* Build cluster: run it, stop it, automate it. One group. */}
+        {canEdit && (
+          <div className="flex items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={onCancelBuild}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+                  onClick={onCompile}
+                  disabled={compiling || !documentPath}
+                  className="btn btn-primary h-7 px-2.5 text-xs"
                 >
-                  <Square className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Cancel</span>
+                  {compiling ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {compiling ? "Compiling" : "Compile"}
+                  </span>
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Cancel build</p>
+                <p>
+                  {documentPath
+                    ? `Compile ${documentPath} (Ctrl+Enter)`
+                    : "Select or create a document first"}
+                </p>
               </TooltipContent>
             </Tooltip>
-          )}
 
-          {/* Auto-compile toggle */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={autoCompileEnabled}
-                aria-label="Toggle auto-compile"
-                onClick={() => onAutoCompileToggle(!autoCompileEnabled)}
-                className={cn(
-                  "relative inline-flex h-5 w-10 items-center rounded-md border transition-colors",
-                  autoCompileEnabled
-                    ? "border-accent/70 bg-accent/25"
-                    : "border-border bg-bg-tertiary"
-                )}
-              >
-                <span
+            {(buildStatus === "compiling" || buildStatus === "queued") &&
+              onCancelBuild && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={onCancelBuild}
+                      className="btn btn-secondary h-7 px-2.5 text-xs"
+                    >
+                      <Square className="h-3 w-3" />
+                      <span className="hidden sm:inline">Cancel</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Cancel build</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+
+            {/* Auto-compile: a labelled switch, not a mystery pill */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={autoCompileEnabled}
+                  aria-label="Toggle auto-compile"
+                  onClick={() => onAutoCompileToggle(!autoCompileEnabled)}
                   className={cn(
-                    "inline-block h-4 w-4 rounded-sm transition-all",
+                    "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border",
+                    "px-2 text-xs font-medium transition-colors duration-150 ease-out",
                     autoCompileEnabled
-                      ? "translate-x-5 bg-accent shadow-sm shadow-accent/30"
-                      : "translate-x-0.5 bg-bg-primary"
+                      ? "border-accent-muted bg-accent-subtle text-text-primary"
+                      : "border-border bg-bg-inset text-text-muted hover:border-border-strong hover:text-text-secondary"
                   )}
-                />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Auto-compile {autoCompileEnabled ? "on" : "off"}</p>
-            </TooltipContent>
-          </Tooltip>
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "relative h-3 w-5 rounded-full transition-colors duration-150 ease-out",
+                      autoCompileEnabled ? "bg-accent" : "bg-border-strong"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 left-0.5 h-2 w-2 rounded-full bg-bg-secondary",
+                        "transition-transform duration-150 ease-out",
+                        autoCompileEnabled && "translate-x-2"
+                      )}
+                    />
+                  </span>
+                  <span className="hidden md:inline">Auto</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Auto-compile {autoCompileEnabled ? "on" : "off"}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
 
-          {/* AI assistant toggle */}
-          {onToggleAiPanel && (
+        <BuildStatusBadge status={buildStatus} />
+
+        {onToggleAiPanel && (
+          <>
+            <div className="mx-0.5 h-4 w-px shrink-0 bg-border-subtle" />
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -344,10 +392,10 @@ export function EditorHeader({
                   onClick={onToggleAiPanel}
                   aria-pressed={aiPanelOpen}
                   className={cn(
-                    "flex items-center gap-1.5 rounded-lg border px-3 py-1 text-sm font-medium transition-colors",
+                    "btn h-7 border px-2.5 text-xs",
                     aiPanelOpen
-                      ? "border-accent/70 bg-accent/15 text-accent"
-                      : "border-border text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                      ? "border-accent-muted bg-accent-subtle text-accent"
+                      : "border-border bg-bg-inset text-text-secondary hover:border-border-strong hover:text-text-primary"
                   )}
                 >
                   <Sparkles className="h-3.5 w-3.5" />
@@ -355,40 +403,41 @@ export function EditorHeader({
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>{aiPanelOpen ? "Hide AI assistant" : "Ask AI about this document"}</p>
+                <p>
+                  {aiPanelOpen ? "Hide AI assistant" : "Ask AI about this document"}
+                </p>
               </TooltipContent>
             </Tooltip>
-          )}
-        </TooltipProvider>
+          </>
+        )}
+      </TooltipProvider>
+
+      {/* Access context, then who else is in the room */}
+      {(role !== "owner" || isSharedProject || hasOtherUsers) && (
+        <>
+          <div className="mx-0.5 h-4 w-px shrink-0 bg-border-subtle" />
+          <div className="flex shrink-0 items-center gap-1.5">
+            {role !== "owner" && (
+              <span className="inline-flex shrink-0 items-center rounded-full border border-border bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-secondary">
+                {role === "editor" ? "Editor" : "Viewer"}
+              </span>
+            )}
+
+            {isSharedProject && (
+              <span className="inline-flex shrink-0 items-center rounded-full border border-accent-muted bg-accent-subtle px-2 py-0.5 text-[10px] font-medium text-accent">
+                Shared
+              </span>
+            )}
+
+            <PresenceAvatars
+              users={presenceUsers}
+              currentUserId={currentUserId}
+              followingUserId={followingUserId}
+              onFollowUser={onFollowUser}
+            />
+          </div>
+        </>
       )}
-
-      <BuildStatusBadge status={buildStatus} />
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Role badge (for shared users) */}
-      {role !== "owner" && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-muted border border-border">
-          {role === "editor" ? "Editor" : "Viewer"}
-        </span>
-      )}
-
-      {isSharedProject && (
-        <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
-          Shared
-        </span>
-      )}
-
-      {/* Presence avatars */}
-      <PresenceAvatars
-        users={presenceUsers}
-        currentUserId={currentUserId}
-        followingUserId={followingUserId}
-        onFollowUser={onFollowUser}
-      />
-
     </AppHeader>
-    </>
   );
 }

@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="108" fill="#1e1e2e"/>
-  <text x="256" y="360" text-anchor="middle" font-family="'Georgia', serif" font-size="320" font-weight="700" fill="#cdd6f4">M</text>
+  <rect width="512" height="512" rx="112" fill="#141210"/>
+  <path d="M198 132 L314 380" stroke="#46ccda" stroke-width="54" stroke-linecap="round"/>
 </svg>

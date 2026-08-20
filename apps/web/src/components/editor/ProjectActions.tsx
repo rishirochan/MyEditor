@@ -37,15 +37,23 @@ export function ProjectActions({
     );
   }
 
+  // Same icon-button vocabulary as the rest of the preview toolbar it sits in.
+  const iconButton =
+    "rounded-md p-1 text-text-muted transition-colors duration-150 ease-out " +
+    "hover:bg-bg-elevated hover:text-text-primary";
+
   return (
     <>
+      {/* Project-level actions are their own group, not more toolbar icons. */}
+      <div className="mx-1 h-4 w-px shrink-0 bg-border-subtle" />
+
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             onClick={handleDownloadZip}
             aria-label="Download source ZIP"
-            className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+            className={iconButton}
           >
             <FileArchive className="h-3.5 w-3.5" />
           </button>
@@ -61,7 +69,7 @@ export function ProjectActions({
                 type="button"
                 onClick={() => setShareOpen(true)}
                 aria-label="Share project"
-                className="rounded p-1 text-text-muted transition-colors hover:text-accent hover:bg-bg-elevated"
+                className={iconButton}
               >
                 <Share2 className="h-3.5 w-3.5" />
               </button>

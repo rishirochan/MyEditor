@@ -256,7 +256,7 @@ function ContextMenu({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 min-w-[140px] rounded-lg border border-border bg-bg-secondary py-1 shadow-lg"
+      className="animate-fade-in fixed z-50 min-w-[168px] rounded-lg border border-border bg-bg-elevated p-1 shadow-lg"
       style={{ left: x, top: y }}
     >
       {!isMulti && canSetEntrypoint && (
@@ -265,13 +265,13 @@ function ContextMenu({
           disabled={isEntrypoint}
           onClick={onSetEntrypoint}
           className={cn(
-            "flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors",
+            "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150 ease-out",
             isEntrypoint
               ? "cursor-default text-text-muted"
-              : "text-accent hover:bg-bg-elevated"
+              : "text-accent hover:bg-accent-subtle"
           )}
         >
-          <Flag className="h-4 w-4" />
+          <Flag className="h-3.5 w-3.5 shrink-0" />
           {isEntrypoint ? "Document root" : "Make document"}
         </button>
       )}
@@ -279,36 +279,37 @@ function ContextMenu({
         <button
           type="button"
           onClick={onRename}
-          className="flex w-full items-center gap-2 px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-text-secondary transition-colors duration-150 ease-out hover:bg-bg-secondary hover:text-text-primary"
         >
-          <Pencil className="h-4 w-4" />
+          <Pencil className="h-3.5 w-3.5 shrink-0" />
           Rename
         </button>
       )}
       <button
         type="button"
         onClick={onCopy}
-        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-text-secondary transition-colors duration-150 ease-out hover:bg-bg-secondary hover:text-text-primary"
       >
-        <Copy className="h-4 w-4" />
+        <Copy className="h-3.5 w-3.5 shrink-0" />
         {isMulti ? `Copy ${selectedCount} files` : "Copy"}
       </button>
       {hasCopied && (
         <button
           type="button"
           onClick={onPaste}
-          className="flex w-full items-center gap-2 px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-text-secondary transition-colors duration-150 ease-out hover:bg-bg-secondary hover:text-text-primary"
         >
-          <ClipboardPaste className="h-4 w-4" />
+          <ClipboardPaste className="h-3.5 w-3.5 shrink-0" />
           Paste
         </button>
       )}
+      <div className="my-1 h-px bg-border-subtle" />
       <button
         type="button"
         onClick={onDelete}
-        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-error transition-colors hover:bg-bg-elevated"
+        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-error transition-colors duration-150 ease-out hover:bg-error-subtle"
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-3.5 w-3.5 shrink-0" />
         {isMulti ? `Delete ${selectedCount} files` : "Delete"}
       </button>
     </div>
@@ -447,13 +448,16 @@ function TreeNodeItem({
           }
         }}
         className={cn(
-          "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm transition-colors",
+          "group relative flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 text-left text-[13px]",
+          "transition-colors duration-150 ease-out focus-visible:outline-offset-[-2px]",
           isActive
-            ? "bg-accent/15 text-accent"
+            ? "bg-accent-subtle font-medium text-accent"
             : isSelected
-              ? "bg-accent/10 text-accent/80"
-              : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary",
-          dropTargetPath === node.path && node.isDirectory && "ring-2 ring-accent/50 bg-accent/10"
+              ? "bg-bg-elevated text-text-primary"
+              : "text-text-secondary hover:bg-bg-elevated/60 hover:text-text-primary",
+          dropTargetPath === node.path &&
+            node.isDirectory &&
+            "bg-accent-subtle text-accent ring-1 ring-accent ring-inset"
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
@@ -465,15 +469,21 @@ function TreeNodeItem({
               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" />
             )}
             {expanded ? (
-              <FolderOpen className="h-4 w-4 shrink-0 text-accent" />
+              <FolderOpen className="h-4 w-4 shrink-0" strokeWidth={1.75} />
             ) : (
-              <Folder className="h-4 w-4 shrink-0 text-accent" />
+              <Folder className="h-4 w-4 shrink-0" strokeWidth={1.75} />
             )}
           </>
         ) : (
           <>
             <span className="w-3.5 shrink-0" />
-            <FileIcon extension={node.path.split(".").pop() ?? ""} className="h-4 w-4 shrink-0 text-text-muted" />
+            <FileIcon
+              extension={node.path.split(".").pop() ?? ""}
+              className={cn(
+                "h-4 w-4 shrink-0",
+                isActive ? "text-accent" : "text-text-muted"
+              )}
+            />
           </>
         )}
         {isRenaming ? (
@@ -493,13 +503,13 @@ function TreeNodeItem({
               }
             }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full min-w-0 rounded border border-accent bg-bg-tertiary px-1 py-0 text-sm text-text-primary outline-none"
+            className="h-[20px] w-full min-w-0 rounded border border-accent bg-bg-inset px-1 py-0 text-[13px] text-text-primary outline-none ring-1 ring-accent"
           />
         ) : (
           <>
             <span className="min-w-0 flex-1 truncate">{node.name}</span>
             {isEntrypoint && (
-              <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
+              <span className="shrink-0 rounded border border-accent-muted px-1 text-[10px] font-medium uppercase tracking-wide text-accent">
                 Doc
               </span>
             )}
@@ -508,7 +518,13 @@ function TreeNodeItem({
       </button>
 
       {node.isDirectory && expanded && (
-        <div>
+        <div className="relative">
+          {/* Indent guide: a hairline, not a rule. */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 w-px bg-border-subtle"
+            style={{ left: `${depth * 12 + 15}px` }}
+          />
           {node.children.map((child) => (
             <TreeNodeItem
               key={child.path}
@@ -533,10 +549,10 @@ function TreeNodeItem({
           ))}
           {node.children.length === 0 && (
             <div
-              className="px-2 py-1 text-xs text-text-muted italic"
+              className="flex h-[26px] items-center pr-2 text-[12px] text-text-muted"
               style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
             >
-              Empty folder
+              Empty
             </div>
           )}
         </div>
@@ -1082,8 +1098,8 @@ export function FileTree({
   return (
     <div
       className={cn(
-        "flex h-full flex-col bg-bg-secondary transition-colors",
-        isDraggingOver && "ring-2 ring-inset ring-accent/50 bg-accent/5"
+        "flex h-full flex-col bg-bg-secondary transition-colors duration-150 ease-out",
+        isDraggingOver && "ring-1 ring-inset ring-accent"
       )}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -1110,8 +1126,8 @@ export function FileTree({
       />
 
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border-subtle px-3">
+        <span className="text-xs font-medium uppercase tracking-wide text-text-muted">
           Files
         </span>
         {!readOnly && (
@@ -1124,7 +1140,7 @@ export function FileTree({
               }}
               title="New Document"
               aria-label="New Document"
-              className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+              className="rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary"
             >
               <BookOpen className="h-4 w-4" />
             </button>
@@ -1136,7 +1152,7 @@ export function FileTree({
               }}
               title="New File"
               aria-label="New File"
-              className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+              className="rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary"
             >
               <FilePlus className="h-4 w-4" />
             </button>
@@ -1148,7 +1164,7 @@ export function FileTree({
               }}
               title="New Folder"
               aria-label="New Folder"
-              className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+              className="rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary"
             >
               <FolderPlus className="h-4 w-4" />
             </button>
@@ -1157,7 +1173,7 @@ export function FileTree({
               onClick={() => fileInputRef.current?.click()}
               title="Upload Files"
               aria-label="Upload Files"
-              className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+              className="rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary"
             >
               <Upload className="h-4 w-4" />
             </button>
@@ -1167,14 +1183,14 @@ export function FileTree({
 
       {/* New file/folder input */}
       {creating && (
-        <form onSubmit={handleCreate} className="border-b border-border px-2 py-2">
+        <form onSubmit={handleCreate} className="shrink-0 border-b border-border-subtle px-2 py-1.5">
           <div className="flex items-center gap-1.5">
             {creating === "folder" ? (
-              <Folder className="h-4 w-4 shrink-0 text-accent" />
+              <Folder className="h-4 w-4 shrink-0 text-accent" strokeWidth={1.75} />
             ) : creating === "document" ? (
-              <BookOpen className="h-4 w-4 shrink-0 text-accent" />
+              <BookOpen className="h-4 w-4 shrink-0 text-accent" strokeWidth={1.75} />
             ) : (
-              <FileIcon extension={newName.split(".").pop() ?? ""}className="h-4 w-4 shrink-0 text-text-muted" />
+              <FileIcon extension={newName.split(".").pop() ?? ""} className="h-4 w-4 shrink-0 text-text-muted" />
             )}
             <input
               ref={inputRef}
@@ -1197,12 +1213,12 @@ export function FileTree({
                     ? "document-name"
                     : "filename.tex"
               }
-              className="w-full rounded border border-accent bg-bg-tertiary px-1.5 py-0.5 text-sm text-text-primary placeholder:text-text-muted outline-none"
+              className="h-[22px] w-full rounded border border-accent bg-bg-inset px-1.5 py-0 text-[13px] text-text-primary ring-1 ring-accent outline-none placeholder:text-text-muted"
             />
             <button
               type="submit"
               aria-label={`Create ${creating}`}
-              className="rounded p-1 text-accent transition-colors hover:bg-accent/10"
+              className="rounded-md p-1 text-accent transition-colors duration-150 ease-out hover:bg-accent-subtle"
             >
               <Check className="h-3.5 w-3.5" />
             </button>
@@ -1212,9 +1228,13 @@ export function FileTree({
 
       {/* Uploading indicator */}
       {uploading && (
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-accent">
-          <Upload className="h-3.5 w-3.5 animate-pulse" />
-          Uploading...
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex shrink-0 items-center gap-2 border-b border-border-subtle px-3 py-1.5 text-xs text-text-secondary"
+        >
+          <Upload className="h-3.5 w-3.5 animate-pulse-soft text-accent" />
+          Uploading files
         </div>
       )}
 
@@ -1222,24 +1242,26 @@ export function FileTree({
       <div
         ref={treeContainerRef}
         tabIndex={0}
-        className="flex-1 overflow-y-auto px-1 py-1 outline-none"
+        className="flex-1 overflow-y-auto px-1 py-1 outline-none focus-visible:ring-1 focus-visible:ring-accent focus-visible:ring-inset"
       >
         {/* Drop overlay */}
         {isDraggingOver && (
-          <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-accent/40 px-4 py-6 text-center mb-1">
-            <Upload className="h-6 w-6 text-accent mb-1.5" />
+          <div className="animate-fade-in mb-1 flex flex-col items-center justify-center rounded-lg border border-dashed border-accent bg-accent-subtle px-4 py-5 text-center">
+            <Upload className="mb-1.5 h-5 w-5 text-accent" strokeWidth={1.75} />
             <p className="text-xs font-medium text-accent">
-              Drop files here to upload
+              Drop to upload
             </p>
           </div>
         )}
 
         {tree.length === 0 && !creating && !isDraggingOver && (
-          <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
-            <File className="h-8 w-8 text-text-muted mb-2" />
-            <p className="text-xs text-text-muted">No files yet</p>
-            <p className="text-xs text-text-muted mt-1">
-              Drag files here or use the buttons above
+          <div className="flex flex-col items-start gap-1 px-3 py-6">
+            <div className="flex items-center gap-2 text-text-secondary">
+              <File className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <p className="text-xs font-medium">No files yet</p>
+            </div>
+            <p className="text-xs text-text-muted">
+              Drop files here, or create one from the header.
             </p>
           </div>
         )}

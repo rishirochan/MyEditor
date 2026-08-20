@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils/cn";
 import {
   Key,
   Plus,
@@ -18,12 +19,13 @@ import {
   Clock,
   Activity,
   AlertTriangle,
+  AlertCircle,
   Loader2,
   X,
   BookOpen,
   Eye,
   EyeOff,
-  ExternalLink,
+  ArrowRight,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────
@@ -147,68 +149,89 @@ function CreateKeyDialog({ open, onClose, onCreated }: CreateKeyDialogProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={handleClose}
-      />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-overlay" onClick={handleClose} />
 
-      <div className="relative z-10 w-full max-w-lg rounded-lg border border-border bg-bg-primary p-6 shadow-xl">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-text-primary">
-            {createdKey ? "API Key Created" : "Create API Key"}
-          </h2>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-key-title"
+        className="animate-slide-up relative z-10 w-full max-w-lg rounded-xl border border-border bg-bg-primary p-6 shadow-xl"
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2
+              id="create-key-title"
+              className="text-base font-semibold text-text-primary"
+            >
+              {createdKey ? "Your new API key" : "Create API key"}
+            </h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              {createdKey
+                ? "Shown once. Copy it before you close this dialog."
+                : "Name the key so you can recognise it later, then choose how long it should live."}
+            </p>
+          </div>
           <button
             type="button"
             onClick={handleClose}
-            className="rounded-md p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+            aria-label="Close"
+            className="btn btn-ghost -mt-1 -mr-1 px-2"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Show created key */}
+        {/* The one and only reveal of the secret */}
         {createdKey && (
           <div className="space-y-4">
-            <div className="rounded-lg bg-success/10 border border-success/20 px-4 py-3">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
-                <div className="text-sm">
-                  <p className="font-medium text-text-primary">
-                    Copy your API key now
-                  </p>
-                  <p className="text-text-secondary mt-1">
-                    This is the only time you&apos;ll see the full key. Store it
-                    securely — it cannot be retrieved later.
-                  </p>
-                </div>
-              </div>
-            </div>
+            <p className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2.5 text-sm text-warning">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                This is the only time the full key is shown. It is stored
+                hashed and cannot be retrieved later. If you lose it, revoke
+                the key and create a new one.
+              </span>
+            </p>
 
-            <div className="flex items-center gap-2">
-              <code className="flex-1 rounded-lg border border-border bg-bg-secondary px-3 py-2.5 text-sm font-mono text-text-primary break-all select-all">
+            <div className="space-y-2">
+              <span className="block text-xs font-medium tracking-wide text-text-muted uppercase">
+                Secret key
+              </span>
+              <code className="block w-full rounded-lg border border-border bg-bg-inset px-3 py-3 font-mono text-sm leading-relaxed break-all text-text-primary select-all">
                 {createdKey}
               </code>
               <button
                 type="button"
                 onClick={handleCopy}
-                className="shrink-0 rounded-lg border border-border bg-bg-elevated p-2.5 text-text-secondary transition-colors hover:text-text-primary hover:bg-border"
+                className={cn(
+                  "btn w-full px-4 py-2.5",
+                  copied ? "btn-secondary text-success" : "btn-primary"
+                )}
               >
                 {copied ? (
-                  <Check className="h-4 w-4 text-success" />
+                  <>
+                    <Check className="h-4 w-4" />
+                    Copied to clipboard
+                  </>
                 ) : (
-                  <Copy className="h-4 w-4" />
+                  <>
+                    <Copy className="h-4 w-4" />
+                    Copy key
+                  </>
                 )}
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={handleClose}
-              className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
-            >
-              Done
-            </button>
+            <div className="border-t border-border-subtle pt-4">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="btn btn-secondary w-full px-4 py-2.5"
+              >
+                I have stored it, close
+              </button>
+            </div>
           </div>
         )}
 
@@ -216,16 +239,20 @@ function CreateKeyDialog({ open, onClose, onCreated }: CreateKeyDialogProps) {
         {!createdKey && (
           <>
             {error && (
-              <div className="mb-4 rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
-                {error}
-              </div>
+              <p
+                role="alert"
+                className="mb-4 flex items-start gap-2 rounded-lg bg-error-subtle px-3 py-2.5 text-sm text-error"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </p>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
+              <div className="space-y-1.5">
                 <label
                   htmlFor="key-name"
-                  className="mb-1.5 block text-sm font-medium text-text-secondary"
+                  className="block text-xs font-medium tracking-wide text-text-muted uppercase"
                 >
                   Key name
                 </label>
@@ -235,20 +262,17 @@ function CreateKeyDialog({ open, onClose, onCreated }: CreateKeyDialogProps) {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
-                  placeholder='e.g. "CI/CD Pipeline", "Local Dev"'
-                  className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+                  placeholder="CI pipeline, local dev, thesis script"
+                  className="input"
                 />
               </div>
 
-              <div>
+              <div className="space-y-1.5">
                 <label
                   htmlFor="key-expiry"
-                  className="mb-1.5 block text-sm font-medium text-text-secondary"
+                  className="block text-xs font-medium tracking-wide text-text-muted uppercase"
                 >
                   Expiration
-                  <span className="ml-1 text-text-muted font-normal">
-                    (optional)
-                  </span>
                 </label>
                 <Select
                   value={expiresInDays || NO_EXPIRY_VALUE}
@@ -256,7 +280,7 @@ function CreateKeyDialog({ open, onClose, onCreated }: CreateKeyDialogProps) {
                     setExpiresInDays(value === NO_EXPIRY_VALUE ? "" : value)
                   }
                 >
-                  <SelectTrigger id="key-expiry" className="w-full">
+                  <SelectTrigger id="key-expiry" className="w-full bg-bg-inset">
                     <SelectValue placeholder="No expiration" />
                   </SelectTrigger>
                   <SelectContent>
@@ -268,29 +292,26 @@ function CreateKeyDialog({ open, onClose, onCreated }: CreateKeyDialogProps) {
                     <SelectItem value="365">1 year</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-text-muted">
+                  An expiring key limits the damage if it leaks. Optional.
+                </p>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex items-center justify-end gap-2 border-t border-border-subtle pt-4">
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="rounded-lg border border-border bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-border"
+                  className="btn btn-ghost px-4 py-2.5"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={creating || !name.trim()}
-                  className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  className="btn btn-primary px-4 py-2.5"
                 >
-                  {creating ? (
-                    <span className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Creating...
-                    </span>
-                  ) : (
-                    "Create Key"
-                  )}
+                  {creating && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {creating ? "Creating" : "Create key"}
                 </button>
               </div>
             </form>
@@ -321,26 +342,39 @@ function DeleteKeyDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-overlay" onClick={onClose} />
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-bg-primary p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-text-primary">
-          Revoke API Key
-        </h2>
-        <p className="mt-2 text-sm text-text-secondary">
-          Are you sure you want to revoke{" "}
-          <span className="font-medium text-text-primary">{keyName}</span>? Any
-          applications using this key will immediately lose access.
-        </p>
-        <div className="mt-6 flex items-center justify-end gap-3">
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="revoke-key-title"
+        className="animate-slide-up relative z-10 w-full max-w-sm rounded-xl border border-border bg-bg-primary p-6 shadow-xl"
+      >
+        <div className="flex items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-error-subtle text-error">
+            <AlertTriangle className="h-4 w-4" />
+          </span>
+          <div>
+            <h2
+              id="revoke-key-title"
+              className="text-base font-semibold text-text-primary"
+            >
+              Revoke this key
+            </h2>
+            <p className="mt-1.5 text-sm text-text-secondary">
+              <span className="font-mono text-text-primary">{keyName}</span>{" "}
+              stops working immediately, and anything still using it will start
+              getting 401 responses. This cannot be undone.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 flex items-center justify-end gap-2 border-t border-border-subtle pt-4">
           <button
             type="button"
             onClick={onClose}
             disabled={deleting}
-            className="rounded-lg border border-border bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-border disabled:opacity-50"
+            className="btn btn-ghost px-4 py-2.5"
           >
             Cancel
           </button>
@@ -348,16 +382,10 @@ function DeleteKeyDialog({
             type="button"
             onClick={onConfirm}
             disabled={deleting}
-            className="rounded-lg bg-error px-4 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-error/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn btn-danger px-4 py-2.5"
           >
-            {deleting ? (
-              <span className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Revoking...
-              </span>
-            ) : (
-              "Revoke Key"
-            )}
+            {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {deleting ? "Revoking" : "Revoke key"}
           </button>
         </div>
       </div>
@@ -377,37 +405,41 @@ function ApiKeyRow({ apiKey, onDelete }: ApiKeyRowProps) {
   const expired = isExpired(apiKey.expiresAt);
 
   return (
-    <div className="flex items-center gap-4 rounded-lg border border-border bg-bg-secondary p-4 transition-colors hover:bg-bg-elevated/50">
-      {/* Key icon */}
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-bg-elevated">
-        <Key className={`h-5 w-5 ${expired ? "text-error" : "text-accent"}`} />
-      </div>
+    <div className="panel flex items-start gap-4 p-4 transition-colors duration-150 hover:border-border-strong">
+      <span
+        className={cn(
+          "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+          expired ? "bg-error-subtle text-error" : "bg-bg-inset text-accent"
+        )}
+      >
+        <Key className="h-4 w-4" />
+      </span>
 
-      {/* Info */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-text-primary truncate">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="truncate text-sm font-semibold text-text-primary">
             {apiKey.name}
           </h3>
           {expired && (
-            <span className="inline-flex items-center rounded-full bg-error/10 px-2 py-0.5 text-xs font-medium text-error">
+            <span className="inline-flex items-center gap-1 rounded-full bg-error-subtle px-2 py-0.5 text-xs font-medium text-error">
+              <AlertTriangle className="h-3 w-3" />
               Expired
             </span>
           )}
         </div>
 
-        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
-          {/* Key prefix */}
-          <span className="flex items-center gap-1">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-text-muted tabular-nums">
+          <span className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => setShowPrefix(!showPrefix)}
-              className="text-text-muted hover:text-text-secondary transition-colors"
+              aria-label={showPrefix ? "Hide key prefix" : "Show key prefix"}
+              className="text-text-muted transition-colors hover:text-text-primary"
             >
               {showPrefix ? (
-                <EyeOff className="h-3 w-3" />
+                <EyeOff className="h-3.5 w-3.5" />
               ) : (
-                <Eye className="h-3 w-3" />
+                <Eye className="h-3.5 w-3.5" />
               )}
             </button>
             <code className="font-mono">
@@ -415,26 +447,30 @@ function ApiKeyRow({ apiKey, onDelete }: ApiKeyRowProps) {
             </code>
           </span>
 
-          {/* Request count */}
-          <span className="flex items-center gap-1">
-            <Activity className="h-3 w-3" />
+          <span className="flex items-center gap-1.5">
+            <Activity className="h-3.5 w-3.5" />
             {Number(apiKey.requestCount).toLocaleString()} requests
           </span>
 
-          {/* Last used */}
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
+          <span className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5" />
             {apiKey.lastUsedAt
               ? `Used ${formatRelativeDate(apiKey.lastUsedAt)}`
               : "Never used"}
           </span>
 
-          {/* Expiry */}
+          <span className="flex items-center gap-1.5">
+            Created {formatDate(apiKey.createdAt)}
+          </span>
+
           {apiKey.expiresAt && (
             <span
-              className={`flex items-center gap-1 ${expired ? "text-error" : ""}`}
+              className={cn(
+                "flex items-center gap-1.5",
+                expired && "text-error"
+              )}
             >
-              <AlertTriangle className="h-3 w-3" />
+              <AlertTriangle className="h-3.5 w-3.5" />
               {expired
                 ? `Expired ${formatDate(apiKey.expiresAt)}`
                 : `Expires ${formatDate(apiKey.expiresAt)}`}
@@ -443,14 +479,14 @@ function ApiKeyRow({ apiKey, onDelete }: ApiKeyRowProps) {
         </div>
       </div>
 
-      {/* Delete button */}
       <button
         type="button"
         onClick={() => onDelete(apiKey)}
-        className="shrink-0 rounded-md p-2 text-text-muted transition-colors hover:text-error hover:bg-error/10"
+        className="btn btn-ghost shrink-0 px-2 hover:bg-error-subtle hover:text-error"
         title="Revoke key"
       >
         <Trash2 className="h-4 w-4" />
+        <span className="sr-only">Revoke {apiKey.name}</span>
       </button>
     </div>
   );
@@ -460,8 +496,8 @@ function ApiKeyRow({ apiKey, onDelete }: ApiKeyRowProps) {
 
 function SkeletonRow() {
   return (
-    <div className="flex items-center gap-4 rounded-lg border border-border bg-bg-secondary p-4 animate-pulse">
-      <div className="h-10 w-10 rounded-lg bg-bg-elevated" />
+    <div className="panel animate-pulse-soft flex items-center gap-4 p-4">
+      <div className="h-9 w-9 rounded-lg bg-bg-elevated" />
       <div className="flex-1 space-y-2">
         <div className="h-4 w-32 rounded bg-bg-elevated" />
         <div className="h-3 w-64 rounded bg-bg-elevated" />
@@ -518,74 +554,78 @@ export default function DeveloperDashboardPage() {
     }
   }
 
+  const origin =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "https://your-instance.com";
+
   return (
-    <>
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-8">
+    <div>
+      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">
-            Developer Settings
+          <h1 className="text-2xl font-semibold text-text-primary">
+            API keys
           </h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Manage API keys and integrate with the MyEditor API
+          <p className="mt-1.5 max-w-[70ch] text-sm text-text-secondary">
+            Keys authenticate scripts and services against the MyEditor API.
+            Each one carries your account access, so treat a key like a
+            password.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           <Link
             href="/dashboard/developers/docs"
-            className="flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-border"
+            className="btn btn-secondary px-4 py-2.5"
           >
             <BookOpen className="h-4 w-4" />
-            API Docs
+            API reference
           </Link>
           <button
             type="button"
             onClick={() => setShowCreateDialog(true)}
-            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
+            className="btn btn-primary px-4 py-2.5"
           >
             <Plus className="h-4 w-4" />
-            Create API Key
+            Create key
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Quick start card */}
-      <div className="mb-8 rounded-lg border border-accent/20 bg-accent/5 p-5">
-        <h2 className="text-sm font-semibold text-text-primary mb-2">
-          Quick Start
-        </h2>
-        <p className="text-sm text-text-secondary mb-3">
-          Use your API key to compile LaTeX documents programmatically. Include
-          the key in the <code className="text-accent font-mono text-xs">Authorization</code> header:
+      {/* Quick start */}
+      <section className="panel mb-10 p-5">
+        <h2 className="text-sm font-semibold text-text-primary">Quick start</h2>
+        <p className="mt-1 max-w-[70ch] text-sm text-text-secondary">
+          Send the key in the{" "}
+          <code className="rounded bg-bg-inset px-1.5 py-0.5 font-mono text-xs text-text-primary">
+            Authorization
+          </code>{" "}
+          header using the Bearer scheme.
         </p>
-        <div className="rounded-lg bg-bg-secondary border border-border p-3 font-mono text-xs text-text-secondary overflow-x-auto">
-          <pre className="whitespace-pre">
-{`curl -X POST ${typeof window !== "undefined" ? window.location.origin : "https://your-instance.com"}/api/v1/compile \\
+        <pre className="mt-3 overflow-x-auto rounded-lg border border-border-subtle bg-bg-inset p-3 font-mono text-xs leading-relaxed whitespace-pre text-text-secondary">
+{`curl -X POST ${origin}/api/v1/compile \\
   -H "Authorization: Bearer bs_YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"source": "\\\\documentclass{article}\\n\\\\begin{document}\\nHello!\\n\\\\end{document}"}'`}
-          </pre>
-        </div>
-        <div className="mt-3 flex items-center gap-4">
-          <Link
-            href="/dashboard/developers/docs"
-            className="text-sm font-medium text-accent hover:text-accent-hover transition-colors flex items-center gap-1"
-          >
-            View full documentation
-            <ExternalLink className="h-3.5 w-3.5" />
-          </Link>
-        </div>
-      </div>
+        </pre>
+        <Link
+          href="/dashboard/developers/docs"
+          className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-accent transition-colors hover:text-accent-hover"
+        >
+          Read the full API reference
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </section>
 
-      {/* API Keys list */}
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-text-primary">API Keys</h2>
-        <span className="text-sm text-text-muted">
-          {apiKeysList.length} / 10 keys
+      {/* Key list */}
+      <div className="mb-3 flex items-baseline justify-between gap-4">
+        <h2 className="text-base font-semibold text-text-primary">
+          Your keys
+        </h2>
+        <span className="text-xs text-text-muted tabular-nums">
+          {apiKeysList.length} of 10 used
         </span>
       </div>
 
-      {/* Loading state */}
       {loading && (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -594,33 +634,33 @@ export default function DeveloperDashboardPage() {
         </div>
       )}
 
-      {/* Empty state */}
       {!loading && apiKeysList.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-bg-secondary/50 px-6 py-16">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-bg-elevated">
-            <Key className="h-7 w-7 text-text-muted" />
-          </div>
-          <h3 className="mt-4 text-lg font-medium text-text-primary">
-            No API keys
+        <div className="rounded-xl border border-dashed border-border bg-bg-secondary px-6 py-12 text-center">
+          <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-bg-inset text-text-muted">
+            <Key className="h-5 w-5" />
+          </span>
+          <h3 className="mt-4 text-base font-semibold text-text-primary">
+            No API keys yet
           </h3>
-          <p className="mt-1 text-sm text-text-secondary text-center max-w-sm">
-            Create an API key to start using the MyEditor API for programmatic
-            LaTeX compilation and project management.
+          <p className="mx-auto mt-2 max-w-[60ch] text-sm text-text-secondary">
+            An API key lets something outside the browser act on your account:
+            a CI job that compiles your thesis on every push, a script that
+            uploads figures, or your own tooling calling the compile endpoint.
+            The key is shown once at creation and can be revoked at any time.
           </p>
           <button
             type="button"
             onClick={() => setShowCreateDialog(true)}
-            className="mt-6 flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover"
+            className="btn btn-primary mt-5 px-4 py-2.5"
           >
             <Plus className="h-4 w-4" />
-            Create API Key
+            Create your first key
           </button>
         </div>
       )}
 
-      {/* Keys list */}
       {!loading && apiKeysList.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {apiKeysList.map((apiKey) => (
             <ApiKeyRow
               key={apiKey.id}
@@ -631,17 +671,15 @@ export default function DeveloperDashboardPage() {
         </div>
       )}
 
-      {/* Back link */}
-      <div className="mt-8 pt-6 border-t border-border">
+      <div className="mt-10 border-t border-border-subtle pt-6">
         <Link
           href="/dashboard"
-          className="text-sm text-text-muted hover:text-text-primary transition-colors"
+          className="text-sm text-text-muted transition-colors hover:text-text-primary"
         >
-          ← Back to Projects
+          Back to projects
         </Link>
       </div>
 
-      {/* Dialogs */}
       <CreateKeyDialog
         open={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
@@ -655,6 +693,6 @@ export default function DeveloperDashboardPage() {
         onConfirm={handleDelete}
         deleting={deleting}
       />
-    </>
+    </div>
   );
 }

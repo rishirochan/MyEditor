@@ -98,17 +98,22 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-to-a-random-64-c
 
 // ─── Presence Colors ───────────────────────────────
 
+// Ten hues at a fixed OKLCH lightness (0.75) and chroma (0.14), so no
+// collaborator reads as louder than another. The 195-215 band is left out
+// on purpose: that is the UI accent, and a cursor must never be mistaken
+// for chrome. Values are hex because they travel over the socket and into
+// inline styles on the client.
 const PRESENCE_COLORS = [
-  "#f38ba8", // red
-  "#fab387", // peach
-  "#f9e2af", // yellow
-  "#a6e3a1", // green
-  "#94e2d5", // teal
-  "#89b4fa", // blue
-  "#b4befe", // lavender
-  "#cba6f7", // mauve
-  "#f5c2e7", // pink
-  "#89dceb", // sky
+  "#fa8789", // rose
+  "#f49157", // ember
+  "#d6a62e", // amber
+  "#a3bb4b", // lime
+  "#65c67d", // green
+  "#0dcaa9", // jade
+  "#63b3ff", // indigo
+  "#a5a0ff", // violet
+  "#d58fe5", // orchid
+  "#ef87ba", // magenta
 ];
 
 let colorIndex = 0;

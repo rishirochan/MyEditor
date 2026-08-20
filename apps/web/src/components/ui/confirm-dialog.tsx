@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { X } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 interface ConfirmDialogProps {
@@ -50,32 +50,54 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-overlay animate-fade-in"
         onClick={onCancel}
       />
 
-      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-bg-primary p-5 shadow-xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        aria-describedby="confirm-dialog-message"
+        className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-bg-secondary p-5 shadow-xl animate-slide-up"
+      >
+        <div className="mb-2 flex items-start justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            {variant === "danger" && (
+              <AlertTriangle className="h-4 w-4 shrink-0 text-error" />
+            )}
+            <h3
+              id="confirm-dialog-title"
+              className="text-sm font-semibold text-text-primary"
+            >
+              {title}
+            </h3>
+          </div>
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+            aria-label="Close"
+            className="-mr-1 -mt-1 rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <p className="mb-5 text-sm text-text-secondary">{message}</p>
+        <p
+          id="confirm-dialog-message"
+          className="mb-5 max-w-[52ch] text-sm leading-relaxed text-text-secondary"
+        >
+          {message}
+        </p>
 
         <div className="flex items-center justify-end gap-2">
           {!alert && (
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-lg border border-border bg-bg-secondary px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-bg-elevated"
+              className="btn btn-secondary"
             >
               {cancelLabel}
             </button>
@@ -85,10 +107,8 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             className={cn(
-              "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-              variant === "danger"
-                ? "bg-error text-white hover:bg-error/90"
-                : "bg-accent text-bg-primary hover:bg-accent-hover"
+              "btn",
+              variant === "danger" ? "btn-danger" : "btn-primary"
             )}
           >
             {alert ? "OK" : confirmLabel}

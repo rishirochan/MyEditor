@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { AlertCircle, Loader2 } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 
 export default function RegisterPage() {
@@ -44,21 +45,28 @@ export default function RegisterPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-text-primary">
+      <h1 className="text-xl font-semibold tracking-tight text-text-primary">
         Create your account
       </h1>
+      <p className="mt-1.5 text-sm text-text-secondary">
+        One account on this server. It stays on this server.
+      </p>
 
       {error && (
-        <div className="mb-4 rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
-          {error}
+        <div
+          role="alert"
+          className="mt-6 flex items-start gap-2.5 rounded-lg bg-error-subtle px-3.5 py-3 text-sm text-error"
+        >
+          <AlertCircle className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{error}</span>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
+      <form onSubmit={handleSubmit} className="mt-7 space-y-5">
+        <div className="space-y-2">
           <label
             htmlFor="name"
-            className="mb-1.5 block text-sm font-medium text-text-secondary"
+            className="block text-xs font-medium tracking-wide text-text-muted uppercase"
           >
             Name
           </label>
@@ -69,14 +77,14 @@ export default function RegisterPage() {
             required
             placeholder="Your name"
             autoComplete="name"
-            className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+            className="input"
           />
         </div>
 
-        <div>
+        <div className="space-y-2">
           <label
             htmlFor="email"
-            className="mb-1.5 block text-sm font-medium text-text-secondary"
+            className="block text-xs font-medium tracking-wide text-text-muted uppercase"
           >
             Email
           </label>
@@ -87,14 +95,14 @@ export default function RegisterPage() {
             required
             placeholder="you@example.com"
             autoComplete="email"
-            className="w-full rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+            className="input"
           />
         </div>
 
-        <div>
+        <div className="space-y-2">
           <label
             htmlFor="password"
-            className="mb-1.5 block text-sm font-medium text-text-secondary"
+            className="block text-xs font-medium tracking-wide text-text-muted uppercase"
           >
             Password
           </label>
@@ -104,19 +112,27 @@ export default function RegisterPage() {
             required
             placeholder="At least 8 characters"
             autoComplete="new-password"
+            aria-describedby="password-help"
           />
+          <p id="password-help" className="text-xs text-text-muted">
+            Minimum 8 characters. Stored hashed with bcrypt.
+          </p>
         </div>
 
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+          aria-busy={loading}
+          className="btn btn-primary w-full py-2.5"
         >
-          {loading ? "Creating account..." : "Create account"}
+          {loading && (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          )}
+          {loading ? "Creating account" : "Create account"}
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-text-muted">
+      <p className="mt-7 border-t border-border-subtle pt-5 text-center text-sm text-text-muted">
         Already have an account?{" "}
         <Link
           href="/login"

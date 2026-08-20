@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-  <rect width="1200" height="630" fill="#1e1e2e"/>
-  <text x="600" y="340" text-anchor="middle" font-family="'Georgia', serif" font-size="280" font-weight="700" fill="#cdd6f4">\</text>
-  <text x="600" y="520" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="48" font-weight="600" fill="#a6adc8">MyEditor</text>
-  <text x="600" y="570" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" fill="#6c7086">Open-source LaTeX editor</text>
+  <rect width="1200" height="630" fill="#141210"/>
+  <rect x="0" y="0" width="1200" height="630" fill="none" stroke="#33302d" stroke-width="2"/>
+  <path d="M556 200 L644 388" stroke="#46ccda" stroke-width="34" stroke-linecap="round"/>
+  <text x="600" y="482" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="600" letter-spacing="-1" fill="#eeede9">MyEditor</text>
+  <text x="600" y="528" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="26" fill="#8c8984">Self-hostable LaTeX editor with live PDF preview</text>
 </svg>

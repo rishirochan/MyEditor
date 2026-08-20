@@ -1,7 +1,7 @@
 "use client";
 
-import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils/cn";
+import { Eye } from "lucide-react";
 import type { PresenceUser } from "@myeditor/shared";
 import {
   Tooltip,
@@ -19,6 +19,11 @@ interface PresenceAvatarsProps {
   followingUserId?: string | null;
   onFollowUser?: (userId: string) => void;
 }
+
+// Collaborator hues are assigned at runtime, so the fill stays inline. The
+// ink on top of it must not: every presence colour is a light pastel, so the
+// label takes the dark end of whichever theme is active.
+const AVATAR_INK = "text-ink-on-hue";
 
 // ─── PresenceAvatars ────────────────────────────────
 
@@ -45,27 +50,37 @@ export function PresenceAvatars({
           return (
             <Tooltip key={user.userId}>
               <TooltipTrigger asChild>
-                <div
-                  className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-full border-2 text-[11px] font-semibold cursor-pointer transition-all hover:scale-110 hover:z-10",
+                <button
+                  type="button"
+                  aria-pressed={isFollowing}
+                  aria-label={
                     isFollowing
-                      ? "ring-2 ring-offset-1 ring-offset-bg-primary scale-110 z-10"
-                      : "border-bg-primary"
+                      ? `Stop following ${user.name}`
+                      : `Follow ${user.name}`
+                  }
+                  className={cn(
+                    "relative flex h-6 w-6 items-center justify-center rounded-full text-[11px]",
+                    "font-semibold ring-2 transition-[transform,box-shadow] duration-150",
+                    "ease-out hover:z-10 hover:scale-110",
+                    AVATAR_INK,
+                    isFollowing
+                      ? "z-10 scale-110 ring-accent"
+                      : "ring-bg-secondary"
                   )}
-                  style={{
-                    backgroundColor: user.color,
-                    color: "#1e1e2e",
-                    ...(isFollowing
-                      ? ({
-                          borderColor: user.color,
-                          ["--tw-ring-color"]: user.color,
-                        } as CSSProperties)
-                      : {}),
-                  }}
+                  style={{ backgroundColor: user.color }}
                   onClick={() => onFollowUser?.(user.userId)}
                 >
                   {user.name.charAt(0).toUpperCase()}
-                </div>
+                  {/* Follow state never rides on colour alone. */}
+                  {isFollowing && (
+                    <span
+                      aria-hidden
+                      className="absolute -right-0.5 -bottom-0.5 grid h-3 w-3 place-items-center rounded-full bg-accent text-accent-fg ring-2 ring-bg-secondary"
+                    >
+                      <Eye className="h-2 w-2" />
+                    </span>
+                  )}
+                </button>
               </TooltipTrigger>
               <TooltipContent>
                 <div className="text-xs">
@@ -76,11 +91,11 @@ export function PresenceAvatars({
                     )}
                   </p>
                   {user.activeFilePath && (
-                    <p className="text-text-muted mt-0.5">
+                    <p className="mt-0.5 font-mono text-text-muted">
                       Viewing {user.activeFilePath}
                     </p>
                   )}
-                  <p className="text-text-muted mt-0.5">
+                  <p className="mt-0.5 text-text-muted">
                     {isFollowing ? "Click to unfollow" : "Click to follow"}
                   </p>
                 </div>
@@ -92,7 +107,7 @@ export function PresenceAvatars({
         {overflow > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-bg-primary bg-bg-elevated text-[10px] font-semibold text-text-secondary cursor-default">
+              <div className="flex h-6 w-6 cursor-default items-center justify-center rounded-full bg-bg-elevated text-[10px] font-semibold text-text-secondary ring-2 ring-bg-secondary">
                 +{overflow}
               </div>
             </TooltipTrigger>

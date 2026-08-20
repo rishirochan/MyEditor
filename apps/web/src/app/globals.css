@@ -1,87 +1,190 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════════
+   MyEditor design tokens — "Graphite & Signal"
+
+   Dark is the primary theme. The scene: someone six hours into a
+   thesis chapter at 1am, one lamp on, a bright white PDF page in
+   the middle of a 27" display. The chrome has to sit *behind* that
+   page without glaring, so every surface is a warm near-black
+   graphite (hue ~75, chroma ~0.005) rather than the blue-black that
+   every code tool defaults to. Paper reads as paper against it.
+
+   The accent is a cool cyan — deliberately the complement of the
+   warm surface, and deliberately not the blue/violet of the editor
+   theme it replaces. It leaves the whole red/amber/green semantic
+   band uncontested, which matters in a build-log UI.
+   ═══════════════════════════════════════════════════════════════ */
+
 @theme {
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  /* System-first. No webfont fetch at build time, so self-hosted
+     Docker builds never depend on fonts.google.com being reachable. */
+  --font-sans: "Inter var", "Inter", -apple-system, BlinkMacSystemFont,
+    "Segoe UI Variable Text", "Segoe UI", system-ui, "Helvetica Neue",
+    sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, "Menlo",
+    "Cascadia Mono", "Fira Code", monospace;
+  /* Only for typeset-LaTeX specimens. Never for UI chrome. */
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+    "Times New Roman", serif;
 
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
 
-  --animate-fade-in: fadeIn 0.2s ease-out;
-  --animate-slide-up: slideUp 0.2s ease-out;
-  --animate-progress: progress 2s ease-in-out infinite;
+  /* Exponential ease-out only. No bounce, no elastic. */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* Token colors — resolved from CSS custom props set by [data-theme] */
+  --animate-fade-in: fadeIn 0.16s var(--ease-out-quart);
+  --animate-slide-up: slideUp 0.2s var(--ease-out-quint);
+  --animate-progress: progress 1.8s var(--ease-out-quart) infinite;
+  --animate-pulse-soft: pulseSoft 2s ease-in-out infinite;
+
+  /* Surfaces ───────────────────────────────────────────── */
   --color-bg-primary: var(--theme-bg-primary);
   --color-bg-secondary: var(--theme-bg-secondary);
   --color-bg-tertiary: var(--theme-bg-tertiary);
   --color-bg-elevated: var(--theme-bg-elevated);
+  --color-bg-inset: var(--theme-bg-inset);
+  --color-overlay: var(--theme-overlay);
+
+  /* Lines ──────────────────────────────────────────────── */
   --color-border: var(--theme-border);
+  --color-border-strong: var(--theme-border-strong);
+  --color-border-subtle: var(--theme-border-subtle);
+
+  /* Text ───────────────────────────────────────────────── */
   --color-text-primary: var(--theme-text-primary);
   --color-text-secondary: var(--theme-text-secondary);
   --color-text-muted: var(--theme-text-muted);
+
+  /* Accent ─────────────────────────────────────────────── */
   --color-accent: var(--theme-accent);
   --color-accent-hover: var(--theme-accent-hover);
-  --color-success: var(--theme-success);
-  --color-error: var(--theme-error);
-  --color-warning: var(--theme-warning);
+  --color-accent-fg: var(--theme-accent-fg);
+  --color-accent-subtle: var(--theme-accent-subtle);
+  --color-accent-muted: var(--theme-accent-muted);
+  --color-ring: var(--theme-accent);
 
+  /* Deliberately not theme-switched. Collaborator presence hues are the
+     same fixed pastels in dark and light, so text sitting on one of them
+     is dark in both. */
+  --color-ink-on-hue: oklch(0.16 0.006 75);
+
+  /* Semantic ───────────────────────────────────────────── */
+  --color-success: var(--theme-success);
+  --color-success-subtle: var(--theme-success-subtle);
+  --color-error: var(--theme-error);
+  --color-error-subtle: var(--theme-error-subtle);
+  --color-warning: var(--theme-warning);
+  --color-warning-subtle: var(--theme-warning-subtle);
+
+  /* Editor ─────────────────────────────────────────────── */
   --color-editor-bg: var(--theme-editor-bg);
   --color-editor-gutter: var(--theme-editor-gutter);
   --color-editor-line-hl: var(--theme-editor-line-hl);
   --color-editor-selection: var(--theme-editor-selection);
+
+  /* Elevation. Dark UI reads depth from a lighter surface plus a
+     hairline more than from a drop shadow, so every level pairs a
+     tinted shadow with a top inset highlight. */
+  --shadow-xs: 0 1px 2px -1px var(--theme-shadow-1);
+  --shadow-sm: 0 1px 2px -1px var(--theme-shadow-1),
+    0 2px 6px -2px var(--theme-shadow-1);
+  --shadow-md: 0 2px 4px -2px var(--theme-shadow-1),
+    0 6px 16px -4px var(--theme-shadow-2), var(--theme-edge-highlight);
+  --shadow-lg: 0 4px 8px -3px var(--theme-shadow-1),
+    0 16px 32px -8px var(--theme-shadow-2), var(--theme-edge-highlight);
+  --shadow-xl: 0 8px 16px -6px var(--theme-shadow-1),
+    0 32px 64px -16px var(--theme-shadow-2), var(--theme-edge-highlight);
 }
 
-/* ─── Dark theme (Catppuccin Mocha) ──────────────── */
+/* ─── Dark ──────────────────────────────────────────────── */
 [data-theme="dark"] {
-  --theme-bg-primary: #1e1e2e;
-  --theme-bg-secondary: #181825;
-  --theme-bg-tertiary: #11111b;
-  --theme-bg-elevated: #313244;
-  --theme-border: #45475a;
-  --theme-text-primary: #cdd6f4;
-  --theme-text-secondary: #a6adc8;
-  --theme-text-muted: #6c7086;
-  --theme-accent: #89b4fa;
-  --theme-accent-hover: #74c7ec;
-  --theme-success: #a6e3a1;
-  --theme-error: #f38ba8;
-  --theme-warning: #fab387;
+  --theme-bg-primary: oklch(0.205 0.005 75);
+  --theme-bg-secondary: oklch(0.172 0.004 75);
+  --theme-bg-tertiary: oklch(0.138 0.004 75);
+  --theme-bg-elevated: oklch(0.262 0.006 75);
+  --theme-bg-inset: oklch(0.155 0.004 75);
+  --theme-overlay: oklch(0.09 0.006 75 / 0.7);
 
-  --theme-editor-bg: #1e1e2e;
-  --theme-editor-gutter: #181825;
-  --theme-editor-line-hl: #2a2b3d;
-  --theme-editor-selection: rgba(137, 180, 250, 0.3);
+  --theme-border: oklch(0.33 0.006 75);
+  --theme-border-strong: oklch(0.52 0.009 75);
+  --theme-border-subtle: oklch(0.248 0.005 75);
 
-  --theme-pdf-shadow: rgba(0, 0, 0, 0.3);
+  --theme-text-primary: oklch(0.945 0.005 85);
+  --theme-text-secondary: oklch(0.775 0.008 85);
+  --theme-text-muted: oklch(0.652 0.009 85);
+
+  --theme-accent: oklch(0.78 0.115 205);
+  --theme-accent-hover: oklch(0.855 0.098 202);
+  --theme-accent-fg: oklch(0.17 0.02 205);
+  --theme-accent-subtle: oklch(0.3 0.045 205);
+  --theme-accent-muted: oklch(0.42 0.065 205);
+
+  --theme-success: oklch(0.8 0.148 152);
+  --theme-success-subtle: oklch(0.3 0.05 152);
+  --theme-error: oklch(0.715 0.175 22);
+  --theme-error-subtle: oklch(0.305 0.07 22);
+  --theme-warning: oklch(0.83 0.145 80);
+  --theme-warning-subtle: oklch(0.32 0.055 80);
+
+  --theme-editor-bg: oklch(0.19 0.005 75);
+  --theme-editor-gutter: oklch(0.19 0.005 75);
+  --theme-editor-line-hl: oklch(0.235 0.007 75);
+  --theme-editor-selection: oklch(0.78 0.115 205 / 0.24);
+
+  --theme-shadow-1: oklch(0.05 0.005 75 / 0.55);
+  --theme-shadow-2: oklch(0.05 0.005 75 / 0.45);
+  --theme-edge-highlight: inset 0 1px 0 0 oklch(1 0 0 / 0.05);
+  --theme-pdf-shadow: oklch(0.05 0.005 75 / 0.6);
 
   color-scheme: dark;
 }
 
-/* ─── Light theme (Catppuccin Latte) ─────────────── */
+/* ─── Light ─────────────────────────────────────────────── */
 [data-theme="light"] {
-  --theme-bg-primary: #eff1f5;
-  --theme-bg-secondary: #e6e9ef;
-  --theme-bg-tertiary: #dce0e8;
-  --theme-bg-elevated: #ccd0da;
-  --theme-border: #bcc0cc;
-  --theme-text-primary: #4c4f69;
-  --theme-text-secondary: #5c5f77;
-  --theme-text-muted: #8c8fa1;
-  --theme-accent: #1e66f5;
-  --theme-accent-hover: #2a6ef5;
-  --theme-success: #40a02b;
-  --theme-error: #d20f39;
-  --theme-warning: #fe640b;
+  --theme-bg-primary: oklch(0.992 0.002 85);
+  --theme-bg-secondary: oklch(0.968 0.004 85);
+  --theme-bg-tertiary: oklch(0.938 0.005 85);
+  --theme-bg-elevated: oklch(0.918 0.006 85);
+  --theme-bg-inset: oklch(0.955 0.004 85);
+  --theme-overlay: oklch(0.28 0.012 75 / 0.42);
 
-  --theme-editor-bg: #eff1f5;
-  --theme-editor-gutter: #e6e9ef;
-  --theme-editor-line-hl: #dce0e8;
-  --theme-editor-selection: #acb0be;
+  --theme-border: oklch(0.882 0.006 85);
+  --theme-border-strong: oklch(0.7 0.009 85);
+  --theme-border-subtle: oklch(0.925 0.005 85);
 
-  --theme-pdf-shadow: rgba(0, 0, 0, 0.1);
+  --theme-text-primary: oklch(0.255 0.012 75);
+  --theme-text-secondary: oklch(0.442 0.012 75);
+  --theme-text-muted: oklch(0.5 0.013 75);
+
+  --theme-accent: oklch(0.46 0.105 210);
+  --theme-accent-hover: oklch(0.39 0.098 210);
+  --theme-accent-fg: oklch(0.99 0.004 210);
+  --theme-accent-subtle: oklch(0.945 0.028 205);
+  --theme-accent-muted: oklch(0.85 0.055 205);
+
+  --theme-success: oklch(0.47 0.14 152);
+  --theme-success-subtle: oklch(0.95 0.04 152);
+  --theme-error: oklch(0.5 0.19 25);
+  --theme-error-subtle: oklch(0.955 0.03 25);
+  --theme-warning: oklch(0.5 0.125 62);
+  --theme-warning-subtle: oklch(0.955 0.045 80);
+
+  --theme-editor-bg: oklch(0.992 0.002 85);
+  --theme-editor-gutter: oklch(0.992 0.002 85);
+  --theme-editor-line-hl: oklch(0.955 0.006 85);
+  --theme-editor-selection: oklch(0.46 0.105 210 / 0.18);
+
+  --theme-shadow-1: oklch(0.32 0.01 75 / 0.12);
+  --theme-shadow-2: oklch(0.32 0.01 75 / 0.08);
+  --theme-edge-highlight: inset 0 1px 0 0 oklch(1 0 0 / 0.6);
+  --theme-pdf-shadow: oklch(0.32 0.01 75 / 0.16);
 
   color-scheme: light;
 }
@@ -92,7 +195,7 @@
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -102,36 +205,159 @@
   100% { transform: translateX(100%); }
 }
 
-* {
-  border-color: var(--color-border);
+@keyframes pulseSoft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
-body {
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-family: var(--font-sans);
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.96) translateY(-2px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-/* Scrollbar styling */
+@keyframes popOut {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.97); }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    background-color: var(--color-bg-tertiary);
+  }
+
+  body {
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
+  }
+
+  /* One focus treatment for the whole app. Keyboard users get a ring
+     on every interactive element without each call site opting in. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::selection {
+    background-color: var(--color-editor-selection);
+    color: var(--color-text-primary);
+  }
+
+  /* Numbers in tables, counters, and log line refs shouldn't jitter. */
+  table,
+  time,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ─── Shared component vocabulary ───────────────────────────
+   Six classes so that a button in the dashboard and a button in
+   the editor are the same button. Anything more specific stays
+   inline at the call site. */
+@layer components {
+  .btn {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg
+      px-3 py-1.5 text-sm font-medium whitespace-nowrap
+      transition-[background-color,border-color,color,opacity] duration-150
+      ease-out disabled:pointer-events-none disabled:opacity-45;
+  }
+
+  .btn-primary {
+    @apply bg-accent text-accent-fg hover:bg-accent-hover active:brightness-95;
+  }
+
+  .btn-secondary {
+    @apply border border-border bg-bg-elevated text-text-primary
+      hover:border-border-strong hover:bg-bg-elevated/70;
+  }
+
+  .btn-ghost {
+    @apply text-text-secondary hover:bg-bg-elevated hover:text-text-primary;
+  }
+
+  .btn-danger {
+    @apply bg-error text-bg-tertiary hover:brightness-110;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-border bg-bg-inset px-3 py-2 text-sm
+      text-text-primary transition-colors duration-150 outline-none
+      placeholder:text-text-muted hover:border-border-strong
+      focus:border-accent focus:ring-1 focus:ring-accent
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .panel {
+    @apply rounded-xl border border-border bg-bg-secondary;
+  }
+
+  /* Radix drives these off data-state, so popovers, menus, selects and
+     tooltips all enter and leave the same way without a plugin. */
+  .pop-anim {
+    transform-origin: var(--radix-popper-transform-origin, center);
+  }
+
+  .pop-anim[data-state="open"],
+  .pop-anim[data-state="delayed-open"] {
+    animation: popIn 0.14s var(--ease-out-quart);
+  }
+
+  .pop-anim[data-state="closed"] {
+    animation: popOut 0.1s ease-in;
+  }
+}
+
+/* Scrollbars — thin, surface-tinted, visible only against content. */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-bg-secondary);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 4px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: var(--color-border-strong);
+  background-clip: content-box;
 }
 
-/* react-pdf viewer */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+* {
+  scrollbar-color: var(--color-border) transparent;
+  scrollbar-width: thin;
+}
+
+/* ─── react-pdf viewer ──────────────────────────────────── */
 .react-pdf__Document {
   display: flex;
   flex-direction: column;
@@ -139,8 +365,11 @@ body {
 }
 
 .react-pdf__Page {
-  margin-bottom: 8px;
-  box-shadow: 0 2px 8px var(--theme-pdf-shadow, rgba(0, 0, 0, 0.3));
+  margin-bottom: 12px;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px var(--theme-pdf-shadow),
+    0 12px 32px -12px var(--theme-pdf-shadow);
 }
 
 .react-pdf__Page__canvas {
@@ -152,46 +381,37 @@ body {
   user-select: text;
 }
 
-/* PDF text selection — use browser default */
-
-/* PDF annotation layer - clickable links */
 .react-pdf__Page__annotations {
   display: block !important;
 }
 
 .react-pdf__Page__annotations a {
-  color: var(--color-accent) !important;
+  color: oklch(0.46 0.105 210) !important;
   text-decoration: underline !important;
   cursor: pointer !important;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s var(--ease-out-quart);
 }
 
 .react-pdf__Page__annotations a:hover {
-  color: var(--color-accent-hover) !important;
-  background-color: rgba(137, 180, 250, 0.1) !important;
-}
-
-[data-theme="light"] .react-pdf__Page__annotations a:hover {
-  background-color: rgba(30, 102, 245, 0.08) !important;
+  background-color: oklch(0.46 0.105 210 / 0.12) !important;
 }
 
 /* Compilation progress bar */
 .compilation-progress {
   height: 2px;
   background: var(--color-accent);
-  animation: progress 2s ease-in-out infinite;
+  animation: progress 1.8s var(--ease-out-quart) infinite;
 }
 
 /* Sync highlight flash in editor */
 .cm-syncHighlight {
   background-color: var(--color-accent);
-  opacity: 0.25;
+  opacity: 0.22;
   border-radius: 2px;
 }
 
-/* ─── CodeMirror 6 Editor Styles ───────────────── */
+/* ─── CodeMirror 6 ──────────────────────────────────────── */
 
-/* Ensure editor takes full height and allows scrolling */
 .cm-editor {
   height: 100%;
   display: flex;
@@ -203,38 +423,40 @@ body {
   flex: 1;
   overflow: auto;
   font-family: var(--font-mono) !important;
-  line-height: 1.6;
+  line-height: 1.65;
   user-select: text;
   -webkit-user-select: text;
 }
 
-/* Editor content — background must be transparent so the selection layer
-   (drawn at z-index:-2 between .cm-editor and .cm-content) remains visible */
+/* Transparent so the selection layer (z-index:-2, between .cm-editor
+   and .cm-content) stays visible. */
 .cm-content {
   background-color: transparent;
   color: var(--color-text-primary);
-  padding: 8px 0;
+  padding: 10px 0;
+  caret-color: var(--color-accent);
 }
 
-/* Gutter (line numbers) styling */
+/* Gutter shares the editor surface — the line-number column reads as
+   part of the page, separated by a hairline instead of a slab. */
 .cm-gutters {
   background-color: var(--color-editor-gutter) !important;
-  border-right: 1px solid var(--color-border) !important;
+  border-right: 1px solid var(--color-border-subtle) !important;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
 }
 
 .cm-lineNumbers {
   color: var(--color-text-muted);
+  opacity: 0.65;
 }
 
 .cm-lineNumbers .cm-gutterElement {
   padding: 0 12px 0 8px;
-  min-width: 32px;
+  min-width: 34px;
   text-align: right;
 }
 
-/* Active line highlighting */
 .cm-activeLine {
   background-color: var(--color-editor-line-hl) !important;
 }
@@ -242,48 +464,22 @@ body {
 .cm-activeLineGutter {
   background-color: var(--color-editor-line-hl) !important;
   color: var(--color-text-primary);
+  opacity: 1;
 }
 
-/* Selection styling (native + drawSelection fallback) */
 .cm-content::selection,
 .cm-line::selection,
 .cm-line > span::selection {
-  background-color: rgba(137, 180, 250, 0.35) !important;
-  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent) !important;
+  background-color: var(--color-editor-selection) !important;
 }
 
 .cm-selectionBackground {
-  background-color: rgba(137, 180, 250, 0.32) !important;
-  background-color: color-mix(in srgb, var(--color-accent) 32%, transparent) !important;
+  background-color: var(--color-editor-selection) !important;
 }
 
-[data-theme="light"] .cm-content::selection,
-[data-theme="light"] .cm-line::selection,
-[data-theme="light"] .cm-line > span::selection {
-  background-color: rgba(30, 102, 245, 0.22) !important;
-}
-
-[data-theme="light"] .cm-selectionBackground {
-  background-color: rgba(30, 102, 245, 0.2) !important;
-}
-
-/* Cursor styling */
 .cm-cursor {
-  border-left-color: var(--color-text-primary) !important;
+  border-left-color: var(--color-accent) !important;
   border-left-width: 2px !important;
-}
-
-/* Native caret color for when drawSelection is not used */
-.cm-content {
-  caret-color: var(--color-text-primary);
-}
-
-[data-theme="dark"] .cm-cursor {
-  border-left-color: #ffffff !important;
-}
-
-[data-theme="dark"] .cm-content {
-  caret-color: #ffffff;
 }
 
 /* Hide local caret while following another collaborator */
@@ -295,27 +491,62 @@ body {
   caret-color: transparent !important;
 }
 
-/* Syntax highlighting - ensure good contrast */
-.cm-keyword { color: #c678dd; }
-.cm-operator { color: #56b6c2; }
-.cm-variable { color: #e06c75; }
-.cm-string { color: #98c379; }
-.cm-comment { color: #5c6370; font-style: italic; }
-.cm-number { color: #d19a66; }
-.cm-property { color: #e06c75; }
-.cm-definition { color: #61afef; }
-.cm-builtin { color: #e5c07b; }
+.cm-editor.cm-focused {
+  outline: none;
+}
 
-/* For light theme adjustments */
-[data-theme="light"] .cm-keyword { color: #a626a4; }
-[data-theme="light"] .cm-operator { color: #0184bc; }
-[data-theme="light"] .cm-variable { color: #e45649; }
-[data-theme="light"] .cm-string { color: #50a14f; }
-[data-theme="light"] .cm-comment { color: #a0a1a7; font-style: italic; }
-[data-theme="light"] .cm-number { color: #986801; }
-[data-theme="light"] .cm-property { color: #e45649; }
-[data-theme="light"] .cm-definition { color: #4078f2; }
-[data-theme="light"] .cm-builtin { color: #c18401; }
+.cm-panels {
+  background-color: var(--color-bg-secondary) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border) !important;
+}
+
+.cm-panel input,
+.cm-panel button {
+  background-color: var(--color-bg-inset);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+
+.cm-tooltip {
+  background-color: var(--color-bg-elevated) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.cm-tooltip-autocomplete ul li[aria-selected] {
+  background-color: var(--color-accent) !important;
+  color: var(--color-accent-fg) !important;
+}
+
+/* Syntax — warm-graphite-tuned. Hues sit between 25 and 305 so no two
+   adjacent token types collide, and none of them competes with the
+   cyan accent used by UI chrome. */
+.cm-keyword { color: oklch(0.79 0.115 305); }
+.cm-operator { color: oklch(0.8 0.09 205); }
+.cm-variable { color: oklch(0.78 0.1 25); }
+.cm-string { color: oklch(0.83 0.115 130); }
+.cm-comment { color: oklch(0.545 0.015 80); font-style: italic; }
+.cm-number { color: oklch(0.82 0.11 70); }
+.cm-property { color: oklch(0.78 0.1 25); }
+.cm-definition { color: oklch(0.8 0.09 240); }
+.cm-builtin { color: oklch(0.84 0.1 92); }
+.cm-meta { color: oklch(0.7 0.05 205); }
+
+[data-theme="light"] .cm-keyword { color: oklch(0.48 0.16 305); }
+[data-theme="light"] .cm-operator { color: oklch(0.5 0.11 205); }
+[data-theme="light"] .cm-variable { color: oklch(0.52 0.16 25); }
+[data-theme="light"] .cm-string { color: oklch(0.48 0.13 140); }
+[data-theme="light"] .cm-comment { color: oklch(0.63 0.015 80); font-style: italic; }
+[data-theme="light"] .cm-number { color: oklch(0.53 0.13 65); }
+[data-theme="light"] .cm-property { color: oklch(0.52 0.16 25); }
+[data-theme="light"] .cm-definition { color: oklch(0.5 0.14 250); }
+[data-theme="light"] .cm-builtin { color: oklch(0.52 0.12 92); }
+[data-theme="light"] .cm-meta { color: oklch(0.5 0.06 205); }
 
 /* Error underline */
 .cm-error-underline {
@@ -323,13 +554,8 @@ body {
   text-decoration-style: wavy;
   text-decoration-color: var(--color-error);
   text-decoration-thickness: 1.5px;
-  text-underline-offset: 2px;
-  background-color: rgba(243, 139, 168, 0.12);
-  background-color: color-mix(in srgb, var(--color-error) 12%, transparent);
-}
-
-[data-theme="light"] .cm-error-underline {
-  background-color: rgba(210, 15, 57, 0.08);
+  text-underline-offset: 3px;
+  background-color: color-mix(in oklab, var(--color-error) 12%, transparent);
 }
 
 /* Clickable URL links in editor (Ctrl/Cmd + click to open) */
@@ -343,9 +569,4 @@ body {
 .cm-url-link:hover {
   color: var(--color-accent-hover);
   text-decoration-style: solid;
-}
-
-/* Ensure editor fills container properly */
-.cm-editor.cm-focused {
-  outline: none;
 }

@@ -27,12 +27,13 @@ export function useTheme() {
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("dark");
 
-  // Read persisted theme on mount
+  // The inline script in the root layout has already applied the stored
+  // theme to <html> before paint, so read it back from there rather than
+  // from localStorage again.
   useEffect(() => {
-    const stored = localStorage.getItem("myeditor-theme") as Theme | null;
-    if (stored === "light" || stored === "dark") {
-      setTheme(stored);
-      document.documentElement.setAttribute("data-theme", stored);
+    const applied = document.documentElement.getAttribute("data-theme");
+    if (applied === "light" || applied === "dark") {
+      setTheme(applied);
     }
   }, []);
 

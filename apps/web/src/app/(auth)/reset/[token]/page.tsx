@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent, use } from "react";
 import Link from "next/link";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { PasswordInput } from "@/components/ui/password-input";
 
@@ -56,29 +57,42 @@ export default function ResetPasswordPage({ params }: PageProps) {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-text-primary">
+      <h1 className="text-xl font-semibold tracking-tight text-text-primary">
         Choose a new password
       </h1>
 
       {success ? (
-        <div className="space-y-4">
-          <div className="rounded-lg bg-success/10 px-4 py-3 text-sm text-success">
-            Password updated. Redirecting to sign in&hellip;
-          </div>
+        <div
+          role="status"
+          className="mt-6 flex items-start gap-2.5 rounded-lg bg-success-subtle px-3.5 py-3 text-sm text-success"
+        >
+          <CheckCircle2 className="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>Password updated. Redirecting to sign in&hellip;</span>
         </div>
       ) : (
         <>
+          <p className="mt-1.5 text-sm leading-relaxed text-text-secondary">
+            This link works once. Set the password you want and sign in with it.
+          </p>
+
           {error && (
-            <div className="mb-4 rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
-              {error}
+            <div
+              role="alert"
+              className="mt-6 flex items-start gap-2.5 rounded-lg bg-error-subtle px-3.5 py-3 text-sm text-error"
+            >
+              <AlertCircle
+                className="mt-px h-4 w-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span>{error}</span>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
+          <form onSubmit={handleSubmit} className="mt-7 space-y-5">
+            <div className="space-y-2">
               <label
                 htmlFor="password"
-                className="mb-1.5 block text-sm font-medium text-text-secondary"
+                className="block text-xs font-medium tracking-wide text-text-muted uppercase"
               >
                 New password
               </label>
@@ -92,10 +106,10 @@ export default function ResetPasswordPage({ params }: PageProps) {
               />
             </div>
 
-            <div>
+            <div className="space-y-2">
               <label
                 htmlFor="confirm"
-                className="mb-1.5 block text-sm font-medium text-text-secondary"
+                className="block text-xs font-medium tracking-wide text-text-muted uppercase"
               >
                 Confirm new password
               </label>
@@ -112,13 +126,17 @@ export default function ResetPasswordPage({ params }: PageProps) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+              aria-busy={loading}
+              className="btn btn-primary w-full py-2.5"
             >
-              {loading ? "Updating..." : "Update password"}
+              {loading && (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              )}
+              {loading ? "Updating" : "Update password"}
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-text-muted">
+          <p className="mt-7 border-t border-border-subtle pt-5 text-center text-sm text-text-muted">
             <Link
               href="/login"
               className="text-accent transition-colors hover:text-accent-hover"

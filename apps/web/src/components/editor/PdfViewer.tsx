@@ -9,7 +9,6 @@ import {
   ZoomOut,
   Download,
   FileText,
-  Loader2,
   ChevronUp,
   ChevronDown,
 } from "lucide-react";
@@ -38,6 +37,21 @@ interface PdfViewerProps {
 export interface PdfViewerHandle {
   saveScrollPosition: () => void;
 }
+
+/** A4-ish placeholder so a rendering page holds its space instead of popping in. */
+function PageSkeleton({ width }: { width?: number }) {
+  return (
+    <div className="mb-3 flex justify-center" aria-hidden>
+      <div
+        className="animate-pulse-soft aspect-[1/1.414] w-full rounded-sm bg-bg-elevated"
+        style={width ? { width } : undefined}
+      />
+    </div>
+  );
+}
+
+const TOOLBAR_BUTTON =
+  "rounded-md p-1.5 text-text-secondary transition-colors duration-150 ease-out hover:bg-bg-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40";
 
 // ─── Constants ──────────────────────────────────────
 
@@ -81,7 +95,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
 
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
+        setContainerWidth(Math.round(entry.contentRect.width));
       }
     });
     ro.observe(container);
@@ -294,12 +308,15 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-full min-h-0 flex-col bg-bg-tertiary">
-        {/* PDF Toolbar */}
-        <div className="flex items-center justify-between border-b border-border bg-bg-secondary px-3 py-1.5">
-          <span className="text-xs font-medium text-text-muted">Preview</span>
+      <div className="relative flex h-full min-h-0 flex-col bg-bg-tertiary">
+        {/* Compile in flight: a hairline of progress, not a blocking spinner. */}
+        {loading && (
+          <div className="compilation-progress absolute inset-x-0 top-0 z-30" />
+        )}
 
-          <div className="flex items-center gap-1">
+        {/* Floating control bar. Chrome hovers over the paper, it does not frame it. */}
+        <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-border bg-bg-elevated px-1.5 py-1 shadow-lg">
             {numPages > 0 && (
               <>
                 <Tooltip>
@@ -309,7 +326,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                       onClick={handlePrevPage}
                       disabled={currentPage <= 1}
                       aria-label="Previous page"
-                      className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
+                      className={TOOLBAR_BUTTON}
                     >
                       <ChevronUp className="h-3.5 w-3.5" />
                     </button>
@@ -317,7 +334,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                   <TooltipContent>Previous page</TooltipContent>
                 </Tooltip>
 
-                <span className="min-w-[48px] text-center text-xs text-text-secondary tabular-nums">
+                <span className="min-w-[52px] text-center text-xs text-text-secondary tabular-nums">
                   {currentPage} / {numPages}
                 </span>
 
@@ -328,7 +345,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                       onClick={handleNextPage}
                       disabled={currentPage >= numPages}
                       aria-label="Next page"
-                      className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
+                      className={TOOLBAR_BUTTON}
                     >
                       <ChevronDown className="h-3.5 w-3.5" />
                     </button>
@@ -347,7 +364,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                   onClick={handleZoomOut}
                   disabled={zoom <= MIN_ZOOM}
                   aria-label="Zoom out"
-                  className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={TOOLBAR_BUTTON}
                 >
                   <ZoomOut className="h-3.5 w-3.5" />
                 </button>
@@ -361,7 +378,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                   type="button"
                   onClick={handleZoomReset}
                   aria-label="Reset zoom"
-                  className="min-w-[40px] rounded px-1 py-0.5 text-center text-xs text-text-secondary tabular-nums transition-colors hover:text-text-primary hover:bg-bg-elevated"
+                  className="min-w-[44px] rounded-md px-1 py-1 text-center text-xs text-text-secondary tabular-nums transition-colors duration-150 ease-out hover:bg-bg-secondary hover:text-text-primary"
                 >
                   {zoomPercent}%
                 </button>
@@ -376,7 +393,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                   onClick={handleZoomIn}
                   disabled={zoom >= MAX_ZOOM}
                   aria-label="Zoom in"
-                  className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={TOOLBAR_BUTTON}
                 >
                   <ZoomIn className="h-3.5 w-3.5" />
                 </button>
@@ -393,7 +410,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                   onClick={handleDownload}
                   disabled={!pdfUrl}
                   aria-label="Download PDF"
-                  className="rounded p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={TOOLBAR_BUTTON}
                 >
                   <Download className="h-3.5 w-3.5" />
                 </button>
@@ -408,27 +425,34 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
         {/* PDF Content */}
         <div className="relative flex-1 min-h-0 overflow-hidden">
           {loading && (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-bg-tertiary/80">
-              <div className="flex flex-col items-center gap-2 animate-fade-in">
-                <Loader2 className="h-6 w-6 animate-spin text-accent" />
-                <span className="text-xs text-text-muted">Compiling...</span>
-              </div>
+            <div className="animate-fade-in pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2">
+              <span
+                role="status"
+                aria-live="polite"
+                className="rounded-full border border-border bg-bg-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary shadow-md"
+              >
+                Compiling
+              </span>
             </div>
           )}
 
           <div ref={containerRef} className="h-full min-h-0 overflow-auto overscroll-contain">
+            {!pdfUrl && loading && (
+              <div className="px-6 py-4">
+                <PageSkeleton width={pageWidth} />
+              </div>
+            )}
+
             {!pdfUrl && !loading && (
               <div className="flex h-full items-center justify-center animate-fade-in">
                 <div className="flex flex-col items-center gap-3 px-4 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-bg-elevated">
-                    <FileText className="h-7 w-7 text-text-muted" />
-                  </div>
+                  <FileText className="h-6 w-6 text-text-muted" strokeWidth={1.5} />
                   <div>
                     <p className="text-sm font-medium text-text-secondary">
                       No PDF preview
                     </p>
                     <p className="mt-1 text-xs text-text-muted">
-                      Hit Compile or enable auto-compile to generate a PDF
+                      Compile the project, or turn on auto-compile, to generate one.
                     </p>
                   </div>
                 </div>
@@ -436,18 +460,20 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
             )}
 
             {pdfUrl && (
-              <div className="py-4">
+              <div className="pt-16 pb-4">
                 <Document
                   file={pdfUrl}
                   onLoadSuccess={onDocumentLoadSuccess}
                   loading={
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="h-6 w-6 animate-spin text-accent" />
+                    <div className="px-6">
+                      <PageSkeleton width={pageWidth} />
                     </div>
                   }
                   error={
                     <div className="flex items-center justify-center py-12">
-                      <p className="text-sm text-error">Failed to load PDF</p>
+                      <p className="rounded-lg bg-error-subtle px-3 py-2 text-sm text-error">
+                        Failed to load PDF
+                      </p>
                     </div>
                   }
                 >
@@ -463,6 +489,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                         <Page
                           pageNumber={pageNum}
                           width={pageWidth}
+                          loading={<PageSkeleton width={pageWidth} />}
                           devicePixelRatio={
                             typeof window !== "undefined"
                               ? Math.max(window.devicePixelRatio || 1, 2)

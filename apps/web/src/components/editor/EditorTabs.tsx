@@ -28,6 +28,27 @@ function getFilename(path: string): string {
   return parts[parts.length - 1];
 }
 
+// One tab shell for files and for the AI tab, so the row reads as one strip.
+// Active tab: content surface + a top hairline. Never a side stripe.
+const TAB_BASE =
+  "group relative flex h-full shrink-0 cursor-pointer select-none items-center " +
+  "gap-1.5 border-r border-border-subtle pr-1.5 pl-3 " +
+  "transition-colors duration-150 ease-out";
+
+const TAB_ACTIVE = "bg-bg-primary text-text-primary";
+const TAB_IDLE =
+  "bg-bg-secondary text-text-muted hover:bg-bg-elevated hover:text-text-secondary";
+
+// Close is revealed on hover but stays reachable by keyboard: it is always in
+// the tab order, and focus inside the tab brings it back to full opacity.
+const CLOSE_BUTTON =
+  "relative grid h-4 w-4 shrink-0 place-items-center rounded-sm text-text-muted " +
+  "transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary";
+
+const CLOSE_ICON =
+  "h-3 w-3 opacity-0 transition-opacity duration-150 ease-out " +
+  "group-hover:opacity-100 group-focus-within:opacity-100";
+
 // ─── EditorTabs ─────────────────────────────────────
 
 export function EditorTabs({
@@ -50,13 +71,18 @@ export function EditorTabs({
   );
 
   if (openFiles.length === 0 && !aiTab) {
-    return (
-      <div className="h-9 border-b border-border bg-bg-secondary" />
-    );
+    return <div className="h-9 border-b border-border bg-bg-secondary" />;
   }
 
   return (
-    <div className="flex h-9 items-end overflow-x-auto border-b border-border bg-bg-secondary scrollbar-none">
+    <div
+      className={cn(
+        "flex h-9 items-stretch overflow-x-auto overflow-y-hidden",
+        "border-b border-border bg-bg-secondary",
+        // Overflow scrolls, but the bar is 36px: no scrollbar eating the row.
+        "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      )}
+    >
       {openFiles.map((file) => {
         const isActive = !aiTab?.active && file.id === activeFileId;
         const isDirty = dirtyFileIds?.has(file.id) ?? false;
@@ -66,85 +92,59 @@ export function EditorTabs({
           <div
             key={file.id}
             onMouseDown={(e) => handleMouseDown(e, file.id)}
-            className={cn(
-              "group relative flex h-full shrink-0 items-center gap-2 border-r border-border px-3 text-sm transition-colors cursor-pointer select-none",
-              isActive
-                ? "bg-bg-primary text-text-primary"
-                : "bg-bg-secondary text-text-muted hover:text-text-secondary hover:bg-bg-elevated/50"
-            )}
+            className={cn(TAB_BASE, isActive ? TAB_ACTIVE : TAB_IDLE)}
           >
-            {/* Active indicator */}
+            {/* Active indicator hairline */}
             {isActive && (
-              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent" />
+              <span
+                aria-hidden
+                className="absolute inset-x-0 top-0 h-0.5 bg-accent"
+              />
             )}
 
             {/* Tab label */}
             <button
               type="button"
               onClick={() => onSelectTab(file.id)}
-              className="truncate max-w-[120px] text-xs"
+              className="max-w-[140px] truncate font-mono text-xs"
               title={file.path}
             >
               {filename}
             </button>
 
-            {/* Dirty indicator or close button */}
-            {isDirty ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseTab(file.id);
-                }}
-                className={cn(
-                  "relative rounded p-0.5 transition-colors",
-                  isActive
-                    ? "text-text-muted hover:text-text-primary hover:bg-bg-elevated"
-                    : "text-text-muted group-hover:text-text-muted hover:!text-text-primary hover:bg-bg-elevated"
-                )}
-              >
-                {/* Dirty dot — hidden on hover, close icon shown instead */}
-                <span className="block group-hover:hidden">
-                  <span className="block h-3 w-3 rounded-full flex items-center justify-center">
-                    <span className="block h-2 w-2 rounded-full bg-text-muted" />
-                  </span>
-                </span>
-                <span className="hidden group-hover:block">
-                  <X className="h-3 w-3" />
-                </span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseTab(file.id);
-                }}
-                className={cn(
-                  "rounded p-0.5 transition-colors",
-                  isActive
-                    ? "text-text-muted hover:text-text-primary hover:bg-bg-elevated"
-                    : "text-transparent group-hover:text-text-muted hover:!text-text-primary hover:bg-bg-elevated"
-                )}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
+            {/* Dirty dot at rest, close on hover or keyboard focus */}
+            <button
+              type="button"
+              aria-label={`Close ${filename}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCloseTab(file.id);
+              }}
+              className={CLOSE_BUTTON}
+            >
+              {isDirty && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute h-1.5 w-1.5 rounded-full bg-text-secondary",
+                    "transition-opacity duration-150 ease-out",
+                    "group-hover:opacity-0 group-focus-within:opacity-0"
+                  )}
+                />
+              )}
+              <X aria-hidden className={CLOSE_ICON} />
+            </button>
           </div>
         );
       })}
 
       {aiTab && (
-        <div
-          className={cn(
-            "group relative flex h-full shrink-0 items-center gap-2 border-r border-border px-3 text-sm transition-colors cursor-pointer select-none",
-            aiTab.active
-              ? "bg-bg-primary text-text-primary"
-              : "bg-bg-secondary text-text-muted hover:text-text-secondary hover:bg-bg-elevated/50"
-          )}
-        >
+        <div className={cn(TAB_BASE, aiTab.active ? TAB_ACTIVE : TAB_IDLE)}>
           {aiTab.active && (
-            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent" />
+            <span
+              aria-hidden
+              className="absolute inset-x-0 top-0 h-0.5 bg-accent"
+            />
           )}
 
           <button
@@ -153,7 +153,12 @@ export function EditorTabs({
             className="flex items-center gap-1.5 text-xs"
             title="AI Assistant"
           >
-            <Sparkles className="h-3 w-3 text-accent" />
+            <Sparkles
+              className={cn(
+                "h-3 w-3",
+                aiTab.active ? "text-accent" : "text-text-muted"
+              )}
+            />
             AI Assistant
           </button>
 
@@ -164,14 +169,9 @@ export function EditorTabs({
               aiTab.onClose();
             }}
             aria-label="Close AI assistant"
-            className={cn(
-              "rounded p-0.5 transition-colors",
-              aiTab.active
-                ? "text-text-muted hover:text-text-primary hover:bg-bg-elevated"
-                : "text-transparent group-hover:text-text-muted hover:!text-text-primary hover:bg-bg-elevated"
-            )}
+            className={CLOSE_BUTTON}
           >
-            <X className="h-3 w-3" />
+            <X aria-hidden className={CLOSE_ICON} />
           </button>
         </div>
       )}

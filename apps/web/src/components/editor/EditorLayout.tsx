@@ -125,6 +125,25 @@ interface EditorLayoutProps {
   onIdentityResolved?: (user: CurrentUser) => void;
 }
 
+// ─── Chrome ─────────────────────────────────────────
+
+// Resize handles are a hairline at rest and only announce themselves under
+// the pointer: the seam thickens and picks up the accent. Colour transitions,
+// the width step is instant so nothing animates layout.
+const RESIZE_HANDLE_COL =
+  "relative w-1.5 shrink-0 cursor-col-resize touch-none bg-transparent " +
+  "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 " +
+  "after:bg-border after:transition-colors after:duration-150 after:ease-out " +
+  "hover:after:w-[3px] hover:after:bg-accent " +
+  "data-[resize-handle-active]:after:w-[3px] data-[resize-handle-active]:after:bg-accent";
+
+const RESIZE_HANDLE_ROW =
+  "relative h-1.5 shrink-0 cursor-row-resize touch-none bg-transparent " +
+  "after:absolute after:inset-x-0 after:top-1/2 after:h-px after:-translate-y-1/2 " +
+  "after:bg-border after:transition-colors after:duration-150 after:ease-out " +
+  "hover:after:h-[3px] hover:after:bg-accent " +
+  "data-[resize-handle-active]:after:h-[3px] data-[resize-handle-active]:after:bg-accent";
+
 // ─── Editor Layout ──────────────────────────────────
 
 export function EditorLayout({
@@ -507,9 +526,14 @@ export function EditorLayout({
 
     pollIntervalRef.current = setInterval(async () => {
       try {
+        const searchParams = new URLSearchParams({ mainFile });
+        const buildId = currentBuildIdRef.current;
+        if (buildId && buildId !== "pending") {
+          searchParams.set("buildId", buildId);
+        }
         const logsRes = await fetch(
           withShareToken(
-            `/api/projects/${project.id}/logs?mainFile=${encodeURIComponent(mainFile)}`
+            `/api/projects/${project.id}/logs?${searchParams}`
           ),
           { cache: "no-store" }
         );
@@ -1023,7 +1047,10 @@ export function EditorLayout({
 
       // Decide whether to actually trigger a compile
       const willCompile = Boolean(
-        shouldCompile && activeDocumentPathRef.current && !compilingRef.current
+        shouldCompile &&
+          activeDocumentPathRef.current &&
+          !compilingRef.current &&
+          !fixingWithAi
       );
 
       if (willCompile) {
@@ -1090,6 +1117,7 @@ export function EditorLayout({
       resetCompileState,
       saveViewPositionsBeforeBuild,
       startBuildPolling,
+      fixingWithAi,
       withShareToken,
     ]
   );
@@ -1149,6 +1177,7 @@ export function EditorLayout({
 
   const handleCompile = useCallback(async () => {
     if (!canEdit) return;
+    if (fixingWithAi) return;
     if (compilingRef.current) return;
     const mainFile = activeDocumentPathRef.current;
     if (!mainFile) return;
@@ -1189,6 +1218,7 @@ export function EditorLayout({
   }, [
     beginCompileTracking,
     canEdit,
+    fixingWithAi,
     project.id,
     resetCompileState,
     saveViewPositionsBeforeBuild,
@@ -1275,15 +1305,6 @@ export function EditorLayout({
 
     setFixingWithAi(true);
     setAiFixExplanation(null);
-    setBuildActorName("You");
-    setBuildStatus("queued");
-    setBuildErrors([]);
-    setPdfLoading(true);
-    setCompiling(true);
-    beginCompileTracking();
-    compilingRef.current = true;
-    pendingRecompileRef.current = false;
-    saveViewPositionsBeforeBuild();
 
     // Same reason as handleAiEditsApplied: a queued debounce save would undo
     // the AI's edits once savedContentRef is invalidated below.
@@ -1323,19 +1344,6 @@ export function EditorLayout({
         setAiFixExplanation(data.explanation);
       }
 
-      const compileStatusCode =
-        typeof data.compile?.statusCode === "number" ? data.compile.statusCode : 500;
-      if (compileStatusCode >= 400) {
-        setBuildStatus("error");
-        const compileError =
-          typeof data.compile?.result?.error === "string"
-            ? data.compile.result.error
-            : "AI fixes were applied, but compile could not be queued.";
-        setBuildLogs(compileError);
-        resetCompileState();
-        return;
-      }
-
       const touchedFilePaths = new Set<string>(
         Array.isArray(data.appliedEdits)
           ? data.appliedEdits
@@ -1357,11 +1365,36 @@ export function EditorLayout({
         fetchFileContent(activeFileId);
       }
 
-      const queuedBuildId = data.compile?.result?.buildId;
-      if (typeof queuedBuildId === "string") {
-        currentBuildIdRef.current = queuedBuildId;
+      const compileStatusCode =
+        typeof data.compile?.statusCode === "number" ? data.compile.statusCode : 500;
+      if (compileStatusCode >= 400) {
+        setBuildStatus("error");
+        const compileError =
+          typeof data.compile?.result?.error === "string"
+            ? data.compile.result.error
+            : "AI fixes were applied, but compile could not be queued.";
+        setBuildLogs(compileError);
+        resetCompileState();
+        return;
       }
 
+      const queuedBuildId = data.compile?.result?.buildId;
+      if (typeof queuedBuildId !== "string") {
+        setBuildStatus("error");
+        setBuildLogs("AI fixes were applied, but compile did not return a build ID.");
+        resetCompileState();
+        return;
+      }
+
+      setBuildActorName("You");
+      setBuildStatus("queued");
+      setBuildErrors([]);
+      setPdfLoading(true);
+      setCompiling(true);
+      beginCompileTracking(queuedBuildId);
+      compilingRef.current = true;
+      pendingRecompileRef.current = false;
+      saveViewPositionsBeforeBuild();
       startBuildPolling();
     } catch {
       setBuildStatus("error");
@@ -1665,7 +1698,7 @@ export function EditorLayout({
   }, [buildLogsExpanded]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-bg-primary">
+    <div className="flex h-full w-full flex-col bg-bg-tertiary">
       {/* Top header */}
       <EditorHeader
         projectName={project.name}
@@ -1701,7 +1734,7 @@ export function EditorLayout({
       />
 
       {/* Main content area */}
-      <div className="flex-1 min-h-0 relative">
+      <div className="relative min-h-0 flex-1 bg-bg-tertiary">
         <PanelGroup
           direction="vertical"
           className="h-full w-full"
@@ -1737,7 +1770,7 @@ export function EditorLayout({
                 />
               </Panel>
 
-              <PanelResizeHandle className="w-2 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/30 data-[resize-handle-active]:bg-accent/30 relative after:absolute after:inset-y-0 after:left-1/2 after:-translate-x-1/2 after:w-px after:bg-border" />
+              <PanelResizeHandle className={RESIZE_HANDLE_COL} />
 
               {/* Code editor (+ optional AI chat tab) */}
               <Panel defaultSize={45} minSize={20}>
@@ -1771,14 +1804,14 @@ export function EditorLayout({
                   <div className={cn("flex-1 min-h-0", aiTabActive && "hidden")}>
                     {activeFileId ? (
                       isImageFile(activeFileId) ? (
-                        <div className="flex h-full items-center justify-center bg-bg-primary p-4 overflow-auto">
+                        <div className="flex h-full items-center justify-center overflow-auto bg-bg-inset p-6">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={withShareToken(
                               `/api/projects/${project.id}/files/${activeFileId}?raw`
                             )}
                             alt={openFiles.find((f) => f.id === activeFileId)?.path ?? "Image"}
-                            className="max-w-full max-h-full object-contain"
+                            className="max-h-full max-w-full rounded-sm object-contain shadow-md"
                           />
                         </div>
                       ) : (
@@ -1803,19 +1836,17 @@ export function EditorLayout({
                         />
                       )
                     ) : (
-                      <div className="flex h-full items-center justify-center animate-fade-in">
-                        <div className="flex flex-col items-center gap-3 text-center px-4">
-                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-elevated">
-                            <FileText className="h-6 w-6 text-text-muted" />
+                      <div className="flex h-full animate-fade-in items-center justify-center bg-bg-primary">
+                        <div className="flex flex-col items-center gap-2.5 px-4 text-center">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border-subtle bg-bg-elevated">
+                            <FileText className="h-4 w-4 text-text-muted" />
                           </div>
-                          <div>
-                            <p className="text-sm font-medium text-text-secondary">
-                              No file open
-                            </p>
-                            <p className="mt-1 text-xs text-text-muted">
-                              Select a file from the sidebar to start editing
-                            </p>
-                          </div>
+                          <p className="text-sm font-medium text-text-secondary">
+                            No file open
+                          </p>
+                          <p className="max-w-[32ch] text-xs text-text-muted">
+                            Pick a file in the tree on the left to start editing.
+                          </p>
                         </div>
                       </div>
                     )}
@@ -1850,7 +1881,7 @@ export function EditorLayout({
                 </div>
               </Panel>
 
-              <PanelResizeHandle className="w-2 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/30 data-[resize-handle-active]:bg-accent/30 relative after:absolute after:inset-y-0 after:left-1/2 after:-translate-x-1/2 after:w-px after:bg-border" />
+              <PanelResizeHandle className={RESIZE_HANDLE_COL} />
 
               {/* PDF viewer */}
               <Panel defaultSize={40} minSize={15}>
@@ -1874,7 +1905,7 @@ export function EditorLayout({
             </PanelGroup>
           </Panel>
 
-          <PanelResizeHandle className="h-2 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-accent/30 data-[resize-handle-active]:bg-accent/30 relative after:absolute after:inset-x-0 after:top-1/2 after:-translate-y-1/2 after:h-px after:bg-border" />
+          <PanelResizeHandle className={RESIZE_HANDLE_ROW} />
 
           {/* Build logs */}
           <Panel

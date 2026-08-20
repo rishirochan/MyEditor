@@ -17,8 +17,7 @@ const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[180px] overflow-hidden rounded-lg border border-border bg-bg-secondary p-1 shadow-lg shadow-black/30",
-        "animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2",
+        "pop-anim z-50 min-w-[180px] overflow-hidden rounded-lg border border-border bg-bg-elevated p-1 shadow-lg",
         className
       )}
       {...props}
@@ -36,9 +35,11 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary outline-none transition-colors",
-      "hover:bg-bg-elevated hover:text-text-primary focus:bg-bg-elevated focus:text-text-primary",
-      "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary outline-none transition-colors duration-150 ease-out",
+      "[&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-text-muted",
+      "hover:bg-accent-subtle hover:text-text-primary focus:bg-accent-subtle focus:text-text-primary",
+      "hover:[&>svg]:text-accent focus:[&>svg]:text-accent",
+      "data-[disabled]:pointer-events-none data-[disabled]:opacity-45",
       inset && "pl-8",
       className
     )}
@@ -53,7 +54,7 @@ const DropdownMenuSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Separator
     ref={ref}
-    className={cn("-mx-1 my-1 h-px bg-border", className)}
+    className={cn("-mx-1 my-1 h-px bg-border-subtle", className)}
     {...props}
   />
 ));

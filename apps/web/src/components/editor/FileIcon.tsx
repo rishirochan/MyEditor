@@ -1,48 +1,53 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  FileText,
+  FileCode2,
+  ScrollText,
   Library,
   Layers,
   Puzzle,
-  Palette,
-  Image,
+  BookMarked,
+  FileImage,
+  Spline,
   FileOutput,
-  PenTool,
-  Table,
+  Table2,
   Shapes,
-  File
+  File,
 } from "lucide-react";
 
+/* Shape carries the meaning, never hue: source (.tex) is the only icon with
+   angle brackets, raster art is a picture frame, vector art is a curve,
+   bibliography is a book, compiled output is an export arrow. */
 export const fileIconMapping: Record<string, LucideIcon> = {
-  ".tex": FileText,
+  ".tex": FileCode2,
   ".cls": Layers,
   ".sty": Puzzle,
   ".bib": Library,
-  ".bst": Palette,
-  ".png": Image,
-  ".jpg": Image,
-  ".jpeg": Image,
-  ".gif": Image,
-  ".svg": PenTool,
+  ".bst": BookMarked,
+  ".png": FileImage,
+  ".jpg": FileImage,
+  ".jpeg": FileImage,
+  ".gif": FileImage,
+  ".svg": Spline,
   ".pdf": FileOutput,
   ".eps": FileOutput,
   ".ps": FileOutput,
-  ".txt": FileText,
-  ".md": FileText,
-  ".csv": Table,
-  ".dat": Table,
+  ".txt": ScrollText,
+  ".md": ScrollText,
+  ".log": ScrollText,
+  ".csv": Table2,
+  ".dat": Table2,
   ".tikz": Shapes,
   ".pgf": Shapes,
 };
 
-
 interface FileIconProps {
-    extension: string;
-    className: string | undefined;
+  extension: string;
+  className: string | undefined;
 }
+
 export default function FileIcon({ extension, className }: FileIconProps) {
-    const trimmed = extension.trim().toLowerCase()
-    const ext = trimmed.startsWith(".") ? trimmed : `.${trimmed}`
-    const IconComponent = fileIconMapping[ext]
-    return IconComponent ? <IconComponent className={className}/> : <File className={className}/>
+  const trimmed = extension.trim().toLowerCase();
+  const ext = trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
+  const IconComponent = fileIconMapping[ext] ?? File;
+  return <IconComponent className={className} strokeWidth={1.75} aria-hidden />;
 }

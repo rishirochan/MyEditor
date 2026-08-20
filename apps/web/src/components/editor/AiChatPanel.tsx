@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { cn } from "@/lib/utils/cn";
-import { Sparkles, Send, X, Loader2, Undo2 } from "lucide-react";
+import { Sparkles, Send, X, Loader2, Undo2, Trash2 } from "lucide-react";
 
 interface AiEdit {
   filePath: string;
@@ -62,6 +62,51 @@ interface AiChatPanelProps {
   pendingSelection: AiSelection | null;
   onClearSelection: () => void;
   onEditsApplied: (touchedPaths: string[]) => void;
+}
+
+/* Fenced blocks, backtick spans and bare LaTeX control sequences read as code.
+   ponytail: no markdown parser, and `$…$` math is left alone so prices don't
+   get monospaced. Add a parser only if messages start carrying real markdown. */
+const CODE_PARTS = /(```[\s\S]*?```|`[^`\n]+`|\\[a-zA-Z@]+\*?)/g;
+
+export function MessageText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(CODE_PARTS).map((part, index) => {
+        if (part.startsWith("```")) {
+          return (
+            <code
+              key={index}
+              className="my-1 block overflow-x-auto rounded-md bg-bg-inset px-2 py-1.5 font-mono text-[11px] leading-[1.7] whitespace-pre text-text-primary"
+            >
+              {part.replace(/^```[^\n]*\n?/, "").replace(/```$/, "")}
+            </code>
+          );
+        }
+        if (part.startsWith("`") && part.length > 1) {
+          return (
+            <code
+              key={index}
+              className="rounded bg-bg-inset px-1 py-0.5 font-mono text-[11px] text-text-primary"
+            >
+              {part.slice(1, -1)}
+            </code>
+          );
+        }
+        if (part.startsWith("\\") && part.length > 1) {
+          return (
+            <code
+              key={index}
+              className="rounded bg-bg-inset px-1 py-0.5 font-mono text-[11px] text-text-primary"
+            >
+              {part}
+            </code>
+          );
+        }
+        return <span key={index}>{part}</span>;
+      })}
+    </>
+  );
 }
 
 function parseChatResult(value: unknown): ChatResult {
@@ -143,6 +188,23 @@ function historyContent(message: AiMessage) {
   return `${message.content.slice(0, Math.max(0, 8000 - metadata.length))}${metadata}`;
 }
 
+function loadThreads(storageKey: string): Map<string, AiMessage[]> {
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return new Map();
+    const stored: Record<string, AiMessage[]> = JSON.parse(raw);
+    return new Map(
+      Object.entries(stored).map(([fileId, messages]) => [
+        fileId,
+        // A reload cancels any in-flight undo, so never restore it as pending.
+        messages.map((message) => ({ ...message, undoing: false })),
+      ])
+    );
+  } catch {
+    return new Map();
+  }
+}
+
 export function AiChatPanel({
   projectId,
   activeFile,
@@ -151,13 +213,50 @@ export function AiChatPanel({
   onClearSelection,
   onEditsApplied,
 }: AiChatPanelProps) {
-  // ponytail: per-file threads are memory-only; lift them only if persistence is needed.
+  // ponytail: per-file threads live in localStorage; move to the DB if they need to
+  // follow the user across browsers.
   const [threads, setThreads] = useState<Map<string, AiMessage[]>>(new Map());
   const [input, setInput] = useState("");
   const [sendingFileId, setSendingFileId] = useState<string | null>(null);
   const [activity, setActivity] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageIdRef = useRef(0);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const loadedKeyRef = useRef<string | null>(null);
+  const storageKey = `ai-chat:${projectId}`;
+
+  // Load once per project (after mount, so SSR markup still matches), then persist
+  // every change so a reload or hot update keeps the conversation.
+  useEffect(() => {
+    if (loadedKeyRef.current !== storageKey) {
+      loadedKeyRef.current = storageKey;
+      const loaded = loadThreads(storageKey);
+      messageIdRef.current = Math.max(
+        0,
+        ...[...loaded.values()].flatMap((messages) =>
+          messages.map((message) => Number(message.id) || 0)
+        )
+      );
+      setThreads(loaded);
+      return;
+    }
+    try {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify(Object.fromEntries(threads))
+      );
+    } catch {
+      // ponytail: out of quota — drop persistence rather than break the chat.
+    }
+  }, [threads, storageKey]);
+
+  // Grow the composer to fit its content instead of scrolling.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
 
   const sending = sendingFileId !== null;
   const thinking = activeFile !== null && sendingFileId === activeFile.id;
@@ -374,11 +473,32 @@ export function AiChatPanel({
 
   return (
     <div className="flex h-full flex-col bg-bg-secondary">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
         <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
-        <span className="min-w-0 flex-1 truncate text-xs text-text-muted">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-muted">
           {activeFile ? activeFile.path : "No file open"}
         </span>
+        <button
+          type="button"
+          onClick={() => {
+            if (!activeFile || messages.length === 0) return;
+            if (!window.confirm("Clear this chat?")) return;
+            // /api/ai/chat is stateless and rebuilds context from client messages,
+            // so dropping the thread resets the assistant memory.
+            setThreads((previous) => {
+              const next = new Map(previous);
+              next.delete(activeFile.id);
+              return next;
+            });
+            setActivity([]);
+          }}
+          disabled={!activeFile || sending || messages.length === 0}
+          aria-label="Clear chat"
+          title="Clear chat"
+          className="rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
@@ -406,27 +526,27 @@ export function AiChatPanel({
             >
               <div
                 className={cn(
-                  "max-w-[85%] whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-xs leading-relaxed",
+                  "whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-xs leading-relaxed",
                   message.role === "user"
-                    ? "bg-accent/15 text-text-primary"
+                    ? "max-w-[85%] bg-accent-subtle text-text-primary"
                     : message.error
-                      ? "border border-error/30 bg-error/10 text-error"
-                      : "bg-bg-elevated text-text-secondary"
+                      ? "max-w-[95%] border border-error bg-error-subtle text-error"
+                      : "max-w-[95%] bg-bg-elevated text-text-secondary"
                 )}
               >
                 {message.selectionLabel && (
-                  <p className="mb-1 text-[10px] font-semibold text-accent">
+                  <p className="mb-1 font-mono text-[10px] font-medium text-accent">
                     {message.selectionLabel}
                   </p>
                 )}
-                {message.content}
+                <MessageText text={message.content} />
                 {message.activity?.length ? (
-                  <details className="mt-1.5 border-t border-border/60 pt-1 text-[10px] text-text-muted">
-                    <summary className="cursor-pointer font-medium">
+                  <details className="mt-1.5 border-t border-border-subtle pt-1 text-[10px] text-text-muted">
+                    <summary className="cursor-pointer font-medium transition-colors duration-150 ease-out hover:text-text-secondary">
                       Activity ({message.activity.length})
                     </summary>
                     <ul
-                      className="mt-1 space-y-0.5 pl-3"
+                      className="mt-1 space-y-0.5 pl-3 font-mono"
                       aria-label="AI activity log"
                     >
                       {message.activity.map((item, index) => (
@@ -436,14 +556,14 @@ export function AiChatPanel({
                   </details>
                 ) : null}
                 {message.appliedEdits?.length ? (
-                  <div className="mt-1.5 border-t border-border/60 pt-1 text-[10px] text-accent">
-                    <p className="font-medium">
-                      ✎ Applied {message.appliedEdits.length} edit
+                  <div className="mt-1.5 border-t border-border-subtle pt-1 text-[10px]">
+                    <p className="font-medium text-accent">
+                      Applied {message.appliedEdits.length} edit
                       {message.appliedEdits.length === 1 ? "" : "s"}
                     </p>
-                    <ul className="mt-0.5 space-y-0.5 text-text-muted">
+                    <ul className="mt-0.5 space-y-0.5 font-mono text-text-muted">
                       {message.appliedEdits.map((edit, index) => (
-                        <li key={`${edit.filePath}-${edit.line}-${index}`}>
+                        <li key={`${edit.filePath}-${edit.line}-${index}`} data-numeric>
                           {edit.filePath}:{edit.line}
                         </li>
                       ))}
@@ -453,10 +573,10 @@ export function AiChatPanel({
                         type="button"
                         onClick={() => handleUndo(activeFile.id, message)}
                         disabled={sending || message.undoing}
-                        className="mt-1 inline-flex items-center gap-1 font-medium text-accent hover:text-text-primary disabled:opacity-50"
+                        className="mt-1 inline-flex items-center gap-1 font-medium text-accent transition-colors duration-150 ease-out hover:text-accent-hover disabled:opacity-50"
                       >
                         <Undo2 className="h-3 w-3" />
-                        {message.undoing ? "Undoing…" : "Undo"}
+                        {message.undoing ? "Undoing..." : "Undo"}
                       </button>
                     ) : message.undone ? (
                       <p className="mt-1 text-text-muted">Undone</p>
@@ -468,12 +588,12 @@ export function AiChatPanel({
                 ) : null}
                 {message.skippedEdits?.length ? (
                   <ul
-                    className="mt-1.5 space-y-0.5 border-t border-error/30 pt-1 text-[10px] text-error"
+                    className="mt-1.5 space-y-0.5 border-t border-border-subtle pt-1 text-[10px] text-error"
                     aria-label="Edits not applied"
                   >
                     {message.skippedEdits.map((edit, index) => (
                       <li key={`${edit.filePath}-${index}`}>
-                        Not applied: {edit.filePath}. {edit.reason}
+                        Not applied: <span className="font-mono">{edit.filePath}</span>. {edit.reason}
                       </li>
                     ))}
                   </ul>
@@ -490,20 +610,28 @@ export function AiChatPanel({
             aria-live="polite"
           >
             {thinking ? (
-              <div className="rounded-md bg-bg-elevated px-2.5 py-1.5">
-                <div className="flex items-center gap-1.5">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Working
+              <div className="animate-fade-in rounded-lg bg-bg-elevated px-2.5 py-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-text-secondary">
+                  <Loader2 className="h-3 w-3 animate-spin text-accent" />
+                  Working
                 </div>
-                <ul className="mt-1 space-y-0.5 pl-3">
-                  {(activity.length ? activity : ["Starting request…"]).map(
-                    (item, index) => (
-                      <li key={`${item}-${index}`}>{item}</li>
+                <ul className="mt-1 space-y-0.5 pl-3 font-mono">
+                  {(activity.length ? activity : ["Starting request..."]).map(
+                    (item, index, all) => (
+                      <li
+                        key={`${item}-${index}`}
+                        className={cn(
+                          index === all.length - 1 && "animate-pulse-soft text-text-secondary"
+                        )}
+                      >
+                        {item}
+                      </li>
                     )
                   )}
                 </ul>
               </div>
             ) : (
-              "Waiting on a reply for another file…"
+              "Waiting on a reply for another file"
             )}
           </div>
         )}
@@ -511,13 +639,13 @@ export function AiChatPanel({
       </div>
 
       {pendingSelection && (
-        <div className="border-t border-border px-3 pt-2">
-          <div className="flex items-start gap-2 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5">
+        <div className="shrink-0 border-t border-border px-3 pt-2">
+          <div className="flex items-start gap-2 rounded-md border border-accent-muted bg-accent-subtle px-2 py-1.5">
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold text-accent">
+              <p className="font-mono text-[10px] font-medium text-accent" data-numeric>
                 Lines {pendingSelection.fromLine}–{pendingSelection.toLine}
               </p>
-              <p className="truncate text-[11px] text-text-secondary">
+              <p className="truncate font-mono text-[11px] text-text-secondary">
                 {pendingSelection.text.slice(0, 80)}
                 {pendingSelection.text.length > 80 ? "…" : ""}
               </p>
@@ -526,7 +654,7 @@ export function AiChatPanel({
               type="button"
               onClick={onClearSelection}
               aria-label="Clear selection"
-              className="shrink-0 rounded p-0.5 text-text-muted transition-colors hover:text-text-primary"
+              className="shrink-0 rounded p-0.5 text-text-muted transition-colors duration-150 ease-out hover:text-text-primary"
             >
               <X className="h-3 w-3" />
             </button>
@@ -537,28 +665,40 @@ export function AiChatPanel({
       <form
         onSubmit={handleSubmit}
         className={cn(
-          "flex items-center gap-2 px-3 py-2",
+          "flex shrink-0 items-end gap-2 px-3 py-2",
           !pendingSelection && "border-t border-border"
         )}
       >
-        <input
-          type="text"
+        <textarea
+          ref={inputRef}
+          rows={1}
           value={input}
           onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
           maxLength={8000}
           disabled={sending || !activeFile}
           placeholder={
             activeFile ? "Ask about this document..." : "Open a file to chat"
           }
-          className="flex-1 rounded-md border border-border bg-bg-primary px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-muted focus:border-accent disabled:opacity-50"
+          className="input flex-1 resize-none overflow-hidden px-2.5 py-1.5 text-xs"
         />
         <button
           type="submit"
           disabled={!input.trim() || sending || !activeFile}
           aria-label="Send message"
-          className="rounded-md p-1.5 text-accent transition-colors hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Send (Enter)"
+          className="btn btn-primary shrink-0 rounded-md p-1.5"
         >
-          <Send className="h-3.5 w-3.5" />
+          {sending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Send className="h-3.5 w-3.5" />
+          )}
         </button>
       </form>
     </div>

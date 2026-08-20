@@ -2,19 +2,21 @@
 
 import { useState, useEffect, useCallback, type FormEvent } from "react";
 import {
-  X,
-  UserPlus,
-  Loader2,
-  Trash2,
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  Clock3,
+  Copy,
   Crown,
   Eye,
-  Pencil,
-  Users,
   Globe,
-  Clock3,
   Link2,
-  Copy,
-  Check,
+  Loader2,
+  Pencil,
+  Trash2,
+  UserPlus,
+  Users,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -266,46 +268,60 @@ export function ShareDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-overlay animate-fade-in"
         onClick={onClose}
       />
 
-      <div className="relative z-10 w-full max-w-2xl rounded-lg border border-border bg-bg-primary p-6 shadow-xl">
-        <div className="mb-5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-accent" />
-            <h2 className="text-lg font-semibold text-text-primary">Share Project</h2>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="share-dialog-title"
+        className="animate-slide-up relative z-10 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-bg-secondary shadow-xl"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border-subtle px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <Users className="h-4 w-4 shrink-0 text-text-muted" aria-hidden />
+            <div>
+              <h2
+                id="share-dialog-title"
+                className="text-sm font-semibold text-text-primary"
+              >
+                Share project
+              </h2>
+              <p className="mt-0.5 truncate text-xs text-text-muted">
+                {projectName}
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-bg-elevated"
+            aria-label="Close"
+            className="-mr-1 rounded-md p-1 text-text-muted transition-colors duration-150 ease-out hover:bg-bg-elevated hover:text-text-primary"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        <p className="mb-4 text-sm text-text-secondary">
-          Manage access for{" "}
-          <span className="font-medium text-text-primary">{projectName}</span>
-        </p>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
 
         {isOwner && (
           <>
-            <form onSubmit={handleInvite} className="mb-4 rounded-lg border border-border p-3">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-text-muted">
-                Share by email
+            <form onSubmit={handleInvite} className="mb-6">
+              <p className="mb-2.5 font-mono text-[11px] font-medium uppercase tracking-wide text-text-muted">
+                Invite by email
               </p>
               <div className="flex flex-wrap gap-2">
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter email address"
+                  placeholder="name@example.com"
+                  aria-label="Collaborator email"
                   required
-                  className="min-w-[220px] flex-1 rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
+                  className="input min-w-[220px] flex-1"
                 />
                 <Select
                   value={role}
@@ -335,7 +351,7 @@ export function ShareDialog({
                 <button
                   type="submit"
                   disabled={inviting || !email.trim()}
-                  className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-bg-primary transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  className="btn btn-primary py-2"
                 >
                   {inviting ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -347,27 +363,35 @@ export function ShareDialog({
               </div>
             </form>
 
-            <div className="mb-5 rounded-xl border border-border bg-bg-secondary/40 p-4">
+            <div className="mb-6 rounded-lg border border-border-subtle bg-bg-inset p-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <Globe className="h-4 w-4 text-accent" />
-                    <p className="text-sm font-semibold text-text-primary">
-                      Public link sharing
+                    <Globe className="h-4 w-4 text-text-muted" aria-hidden />
+                    <p className="text-sm font-medium text-text-primary">
+                      Public link
                     </p>
                     <span
                       className={cn(
-                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
                         publicEnabled
-                          ? "border-accent/35 bg-accent/15 text-accent"
-                          : "border-border bg-bg-elevated text-text-muted"
+                          ? "bg-warning-subtle text-warning"
+                          : "bg-bg-elevated text-text-muted"
                       )}
                     >
-                      {publicEnabled ? "Enabled" : "Disabled"}
+                      {publicEnabled ? (
+                        <>
+                          <Globe className="h-2.5 w-2.5" aria-hidden />
+                          On
+                        </>
+                      ) : (
+                        "Off"
+                      )}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-text-muted">
-                    Anyone with this link can open your project without signing in.
+                  <p className="mt-1.5 max-w-[52ch] text-xs leading-relaxed text-text-muted">
+                    Anyone holding the link opens the project without signing
+                    in. Turn it off to revoke every copy of the link at once.
                   </p>
                 </div>
 
@@ -378,18 +402,18 @@ export function ShareDialog({
                   aria-label="Toggle public link sharing"
                   onClick={() => setPublicEnabled((prev) => !prev)}
                   className={cn(
-                    "relative inline-flex h-6 w-11 items-center rounded-md border transition-colors",
+                    "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors duration-150 ease-out",
                     publicEnabled
-                      ? "border-accent/70 bg-accent/25"
-                      : "border-border bg-bg-tertiary"
+                      ? "border-accent bg-accent"
+                      : "border-border bg-bg-elevated hover:border-border-strong"
                   )}
                 >
                   <span
                     className={cn(
-                      "inline-block h-5 w-5 rounded-sm transition-all",
+                      "inline-block h-4 w-4 rounded-full transition-transform duration-150 ease-out",
                       publicEnabled
-                        ? "translate-x-5 bg-accent shadow-sm shadow-accent/30"
-                        : "translate-x-0.5 bg-bg-primary"
+                        ? "translate-x-[22px] bg-accent-fg"
+                        : "translate-x-[3px] bg-text-muted"
                     )}
                   />
                 </button>
@@ -430,7 +454,7 @@ export function ShareDialog({
                   type="button"
                   onClick={handlePublicShareSave}
                   disabled={updatingPublic}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary transition-colors hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-50"
+                  className="btn btn-secondary py-2"
                 >
                   {updatingPublic ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -453,7 +477,7 @@ export function ShareDialog({
                         setError("Could not copy link");
                       }
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary transition-colors hover:bg-bg-elevated"
+                    className="btn btn-secondary py-2"
                   >
                     {copiedPublicUrl ? (
                       <Check className="h-4 w-4 text-success" />
@@ -466,15 +490,19 @@ export function ShareDialog({
               </div>
 
               {publicEnabled && publicUrl && (
-                <div className="mt-3 rounded-lg border border-border bg-bg-secondary p-2.5">
-                  <p className="mb-1 text-[11px] text-text-muted">Public URL</p>
+                <div className="mt-3 rounded-md border border-border bg-bg-secondary p-2.5">
+                  <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-text-muted">
+                    Public URL
+                  </p>
                   <div className="flex items-center gap-2">
-                    <Link2 className="h-3.5 w-3.5 text-text-muted" />
+                    <Link2 className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
                     <input
                       type="text"
                       value={publicUrl}
                       readOnly
-                      className="min-w-0 flex-1 bg-transparent text-xs text-text-secondary outline-none"
+                      aria-label="Public project URL"
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="min-w-0 flex-1 select-all bg-transparent font-mono text-xs text-text-secondary outline-none"
                     />
                   </div>
                 </div>
@@ -483,36 +511,65 @@ export function ShareDialog({
           </>
         )}
 
-        {error && <p className="mb-2 text-xs text-error">{error}</p>}
-        {success && <p className="mb-2 text-xs text-success">{success}</p>}
+        {error && (
+          <p
+            role="alert"
+            className="mb-3 flex items-start gap-2 rounded-md bg-error-subtle px-2.5 py-2 text-xs text-error"
+          >
+            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>{error}</span>
+          </p>
+        )}
+        {success && (
+          <p
+            role="status"
+            className="mb-3 flex items-start gap-2 rounded-md bg-success-subtle px-2.5 py-2 text-xs text-success"
+          >
+            <CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>{success}</span>
+          </p>
+        )}
 
-        <div className="max-h-64 space-y-1 overflow-y-auto">
+        <p className="mb-2.5 font-mono text-[11px] font-medium uppercase tracking-wide text-text-muted">
+          People with access
+        </p>
+
+        <div className="space-y-0.5">
           {owner && (
-            <div className="flex items-center gap-3 rounded-lg bg-bg-secondary/50 px-3 py-2.5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-sm font-semibold text-accent">
+            <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-subtle text-sm font-semibold text-accent">
                 {owner.name.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-text-primary">{owner.name}</p>
                 <p className="truncate text-xs text-text-muted">{owner.email}</p>
               </div>
-              <div className="flex items-center gap-1.5 text-xs font-medium text-accent">
-                <Crown className="h-3.5 w-3.5" />
+              <div className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-text-secondary">
+                <Crown className="h-3.5 w-3.5 text-warning" aria-hidden />
                 Owner
               </div>
             </div>
           )}
 
           {loading && collaborators.length === 0 && (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 className="h-5 w-5 animate-spin text-text-muted" />
+            <div aria-busy className="space-y-0.5">
+              {[0, 1].map((row) => (
+                <div key={row} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="animate-pulse-soft h-8 w-8 shrink-0 rounded-full bg-bg-elevated" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="animate-pulse-soft h-3 w-32 rounded bg-bg-elevated" />
+                    <div className="animate-pulse-soft h-2.5 w-44 rounded bg-bg-elevated" />
+                  </div>
+                </div>
+              ))}
+              <span className="sr-only">Loading collaborators</span>
             </div>
           )}
 
           {collaborators.map((collab) => (
             <div
               key={collab.id}
-              className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-bg-elevated/50"
+              className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-bg-elevated"
             >
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-bg-elevated text-sm font-semibold text-text-secondary">
                 {collab.name.charAt(0).toUpperCase()}
@@ -520,7 +577,7 @@ export function ShareDialog({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-text-primary">{collab.name}</p>
                 <p className="truncate text-xs text-text-muted">{collab.email}</p>
-                <p className="mt-0.5 text-[11px] text-text-muted">
+                <p className="mt-0.5 text-[11px] text-text-muted" data-numeric>
                   {formatExpiry(collab.expiresAt)}
                 </p>
               </div>
@@ -544,8 +601,9 @@ export function ShareDialog({
                   <button
                     type="button"
                     onClick={() => handleRemove(collab.id)}
-                    className="rounded-md p-1 text-text-muted transition-colors hover:bg-error/10 hover:text-error"
+                    className="rounded-md p-1.5 text-text-muted transition-colors duration-150 ease-out hover:bg-error-subtle hover:text-error"
                     title="Remove collaborator"
+                    aria-label={`Remove ${collab.name}`}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -569,12 +627,18 @@ export function ShareDialog({
           ))}
 
           {!loading && collaborators.length === 0 && (
-            <div className="py-6 text-center">
-              <p className="text-sm text-text-muted">
-                No email collaborators yet.
+            <div className="px-3 py-6">
+              <p className="text-sm text-text-secondary">
+                No collaborators yet
+              </p>
+              <p className="mt-1 max-w-[56ch] text-xs leading-relaxed text-text-muted">
+                {isOwner
+                  ? "Invite someone by email to give them their own sign-in, an editor or viewer role, and an expiry you control. Use the public link only when you want anyone holding the URL to get in."
+                  : "Only the project owner can invite people."}
               </p>
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>
