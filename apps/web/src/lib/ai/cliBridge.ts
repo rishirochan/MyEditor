@@ -28,8 +28,9 @@ async function requestBridge(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
+  let response: Response;
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    response = await fetch(`${baseUrl}${path}`, {
       ...init,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -37,6 +38,17 @@ async function requestBridge(
       },
       signal: controller.signal,
     });
+  } catch {
+    clearTimeout(timeout);
+    if (controller.signal.aborted) {
+      throw new Error(`CLI bridge timed out after ${timeoutMs}ms`);
+    }
+    throw new Error(
+      "CLI bridge is unavailable. Start it with `pnpm bridge` and try again."
+    );
+  }
+
+  try {
     const body = await response.text();
     if (!response.ok) {
       throw new Error(
@@ -48,11 +60,6 @@ async function requestBridge(
     } catch {
       throw new Error("CLI bridge returned invalid JSON");
     }
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`CLI bridge timed out after ${timeoutMs}ms`);
-    }
-    throw error;
   } finally {
     clearTimeout(timeout);
   }
