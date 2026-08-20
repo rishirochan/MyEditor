@@ -7,12 +7,12 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
 
 # Copy workspace config and all package.json files
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/ws/package.json apps/ws/
 COPY packages/shared/package.json packages/shared/
 
 # Install dependencies from workspace root
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # Copy source
 COPY packages/shared/ packages/shared/
@@ -33,12 +33,12 @@ ENV NODE_ENV=production
 RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
 
 # Copy workspace config and package files
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/ws/package.json apps/ws/
 COPY packages/shared/package.json packages/shared/
 
 # Install production dependencies only
-RUN pnpm install --no-frozen-lockfile --prod
+RUN pnpm install --frozen-lockfile --prod
 
 # Copy built output
 COPY --from=builder /app/apps/ws/dist ./apps/ws/dist
