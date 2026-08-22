@@ -1,6 +1,6 @@
 <h1 align="center">MyEditor</h1>
-<p align="center"><strong>Self-hostable, open-source LaTeX editor with live PDF preview and a full REST API.</strong></p>
-<p align="center">Write beautiful documents with a modern editing experience — on your own infrastructure.</p>
+<p align="center"><strong>Overleaf, on your own box.</strong></p>
+<p align="center">Write LaTeX in the browser, watch the PDF update as you type, and keep every file on hardware you control.</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
@@ -9,654 +9,391 @@
   <img src="https://img.shields.io/badge/Docker-ready-2496ED" alt="Docker" />
 </p>
 
-## 🎥 Demo
-https://github.com/user-attachments/assets/16e5fb58-f64b-47cc-a2a6-185f437c3f3b
+## Why this exists
 
+Hosted LaTeX services are good products with a bad deal attached. Your thesis
+lives on someone else's server, the compile queue is shared with everyone else
+on the free tier, and the day you want an API you find out it costs money.
 
+MyEditor is the same workflow without the deal. One `docker compose up -d` gives
+you the editor, a live PDF pane, a sandboxed TeX Live compiler, and a REST API
+that can turn a `.tex` file into a PDF from any script you write. Nothing calls
+home. If the internet drops, your compiler is still on your desk.
 
----
+It is aimed at people who write long documents. Theses, papers, Beamer decks,
+CVs. The kind of work where you spend six hours in the same split view and care
+more about where the error on line 412 is than about the toolbar.
 
-## ✨ Features
+### The AI part costs you nothing extra
 
-- **Live PDF Preview** — See your document update in real-time as you type. Auto-compilation on save with real-time WebSocket status updates via a standalone server.
-- **Full LaTeX Engine Support** — Compile with `auto`, `pdflatex`, `xelatex`, `lualatex`, or `latex`. `auto` is the default and selects the engine from source heuristics at build time.
-- **Project Management** — Create, organize, and manage multiple LaTeX projects from a clean dashboard.
-- **Main File Entrypoint Control** — Set any `.tex` file as the project entrypoint for compile/PDF output.
-- **Built-in File Tree** — Navigate project files with a sidebar file explorer. Create, rename, upload, and delete files.
-- **Code Editor** — Syntax-highlighted LaTeX editing powered by CodeMirror 6 with search, autocomplete, and keyboard shortcuts.
-- **Build Logs & Error Parsing** — Structured build output with clickable errors that jump to the offending line in the editor.
-- **AI Build Fixes (Optional)** — One-click `Fix with AI` can analyze compile errors/logs, apply minimal line edits, and queue a rebuild.
-- **Per-Purpose AI Model Settings** — Configure separate providers/models for build fixing and LaTeX writing, with account-level AI enable/disable.
-- **Resizable Panels** — IDE-like layout with draggable dividers between file tree, editor, PDF viewer, and build logs.
-- **Template System** — Start new projects from built-in templates: Blank, Article, Thesis, Beamer (Presentation), and Letter.
-- **Sandboxed Compilation** — Each build runs in an isolated Docker container with memory/CPU limits, network disabled, and auto-cleanup.
-- **BullMQ Build Queue** — Web/API processes enqueue and cancel jobs in BullMQ (Redis-backed); compile execution runs in the dedicated worker by default.
-- **REST API** — Full public API with API key authentication. Compile LaTeX to PDF, manage projects, upload files — all via HTTP.
-- **Developer Dashboard** — Generate and manage API keys from the UI. Built-in API documentation page.
-- **User Authentication** — Session-based auth with secure password hashing (bcrypt), JWT-signed session cookies, and DB-backed session records.
-- **Dark & Light Themes** — Toggle between dark and light mode with a single click.
-- **One-Click Self-Hosting** — Deploy with a single `docker compose up -d`. Includes PostgreSQL, Redis, web app, WebSocket server, and dedicated compile worker.
-- **Configurable Limits** — File size, compile timeout, and concurrency limits are configurable via environment variables.
-- **Open Source** — Fully open-source under the MIT license.
+Most editors that ship an assistant hand you a second bill. Buy credits, or
+paste an OpenAI key and watch the meter run while you write a thesis.
 
----
+You are probably already paying for Claude or ChatGPT. If the `claude` or
+`codex` CLI is logged in on your machine, MyEditor uses that subscription. No
+API key, no per-token charge, no credit balance to top up. Your existing plan is
+the plan. The [CLI bridge](#optional-the-cli-bridge) is how a containerized app
+reaches a CLI on your host without ever holding your login token.
 
-## 🚀 One-Click Deploy
+And the assistant works on the document instead of next to it. No tabbing out to
+a chat window, pasting your preamble in for context, pasting the answer back,
+and finding out it renamed a label you needed. It reads the files you point it
+at, edits them in place, and gives you one button to undo the whole edit if you
+hate it. The clipboard round trip is the part I actually wanted to delete.
 
-### Prerequisites
+## What you get
 
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
-- A PostgreSQL database — either use the **built-in** Docker container or an **external** hosted instance (Neon, Supabase, Railway, your own server, etc.)
+- Live PDF preview that recompiles on save, with build status pushed over
+  WebSocket instead of polling.
+- Sandboxed compiles. Every build runs in its own container with networking off,
+  all Linux capabilities dropped, a PID cap, and configurable memory and CPU
+  limits. A malicious `\write18` gets nowhere.
+- Engine selection per project: `pdflatex`, `xelatex`, `lualatex`, `latex`, or
+  `auto`, which reads your preamble and picks for you.
+- Build logs parsed into clickable errors that jump to the offending line.
+- A file tree, editor tabs, upload, rename, and a main-file setting so a
+  multi-file thesis compiles from the right entrypoint.
+- Templates: blank, article, thesis, Beamer, letter.
+- A REST API with its own keys. Compile one-shot documents, manage projects and
+  files, download PDFs. Full endpoint list in [DOCS.md](DOCS.md#-rest-api).
+- An assistant that runs on the Claude or ChatGPT subscription you already pay
+  for, through the local CLI, at no extra cost. An API key works too if you
+  prefer one.
+- That assistant edits the `.tex` files directly. Give it up to two files from
+  the current folder as context, highlight a passage to scope the change, and
+  undo the whole edit in one click. Nothing gets copy-pasted into a chat window.
+- One-click build fixes. It reads the failing compile log, applies the minimal
+  line edits, and queues a rebuild.
+
+Sensible defaults, MIT licensed, no telemetry.
+
+## Set it up
+
+You need [Docker Desktop](https://docs.docker.com/get-docker/) installed and
+running, and about 10 GB of free disk for the TeX Live image. That is the whole
+list for this path.
 
 ```bash
 git clone https://github.com/rishirochan/MyEditor.git
 cd MyEditor
 cp .env.example .env
-# (optional) edit .env to change SESSION_SECRET, PORT, etc.
+
+# Set a real session secret before the first start, not after.
+sed -i '' "s|^SESSION_SECRET=.*|SESSION_SECRET=$(openssl rand -hex 32)|" .env
+
+touch apps/worker/.env   # see the note below
+
 docker compose up -d
 ```
 
-That's it. PostgreSQL, Redis, web app, WebSocket server, and compile worker all start together.
+Do not skip the secret. If `SESSION_SECRET` is left at the placeholder the stack
+still boots, quietly, using a value that is published in this repository, which
+means anyone can forge a session cookie for your instance. Changing it later
+logs everyone out and makes stored AI keys undecryptable, so set it once, now.
 
-Open [http://localhost:3000](http://localhost:3000) (or whichever `PORT` you set) and create your account.
+The `touch` is a wart. The compile worker's start script reads
+`apps/worker/.env`, that file is gitignored, and a fresh clone therefore does
+not have one. Without it the worker container crash-loops and every build sits
+in "queued" forever. An empty file is enough. Compose already passes the worker
+every variable it needs.
 
-> **Using an external database?** Set `DATABASE_URL` in `.env` to your connection string.
-> The bundled PostgreSQL will still start but will sit idle using minimal resources.
+First run takes a few minutes because Compose builds the TeX Live image, which
+is a full distribution. After that it starts in seconds. Five containers come
+up: Postgres, Redis, the web app, the WebSocket server, and the compile worker.
 
-Docker Compose automatically:
-- Builds the TeX Live compiler image (~2–5 min on first run)
-- Starts PostgreSQL 16 with persistent storage
-- Starts Redis 7 for job queuing
-- Builds and launches the web application on port 3000
-- Starts the dedicated BullMQ compile worker
-- Starts the WebSocket server on port 3001 for real-time build updates
-
-### Platform Deployment (Dokploy, Coolify, Portainer, etc.)
-
-If your platform handles networking and reverse proxy for you, add this line to `.env` to **disable host port exposure**:
-
-```env
-COMPOSE_FILE=docker-compose.yml
-```
-
-This tells Docker Compose to skip the override file that publishes the port. Your platform's reverse proxy connects to the container over the Docker network — no port leaks to the host.
-
-### Reverse Proxy & WebSocket Setup
-
-**Direct access (no reverse proxy):** WebSocket works out of the box. The frontend auto-detects the ws server on port 3001.
-
-**Behind a reverse proxy (Nginx, Traefik, Caddy, etc.):** You need to route WebSocket traffic to the `ws` container. The frontend auto-detects and connects to `wss://your-domain.com/ws/socket.io` when served over HTTPS.
-
-1. **Route `/ws/*` to the ws container** (port 3001)
-2. **Set `WS_PATH_PREFIX=/ws`** in `.env` so the ws server listens on `/ws/socket.io` instead of `/socket.io`
-3. **Enable `SECURE_COOKIES=true`** if behind HTTPS
-
-<details>
-<summary><strong>Nginx example</strong></summary>
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name your-domain.com;
-
-    # App
-    location / {
-        proxy_pass http://app:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # WebSocket server
-    location /ws/ {
-        proxy_pass http://ws:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Caddy example</strong></summary>
-
-```caddyfile
-your-domain.com {
-    handle /ws/* {
-        reverse_proxy ws:3001
-    }
-    handle {
-        reverse_proxy app:3000
-    }
-}
-```
-
-</details>
-
-> **Platform-managed proxies (Dokploy, Coolify):** Create a separate route/domain entry for the `ws` service with path `/ws`, container port `3001`, and **do not strip the path prefix**. Set `WS_PATH_PREFIX=/ws` in your environment.
-
-### Environment Variables
-
-Create a `.env` file in the project root (or edit the one from `.env.example`):
-
-```env
-PORT=3000
-WS_PORT=3001
-SESSION_SECRET=change-me-to-a-random-64-char-string
-
-# Only set this if you want to use an external database.
-# By default, the bundled PostgreSQL is used automatically.
-# DATABASE_URL=postgresql://user:password@your-host:5432/backslash
-MIGRATE_MAX_ATTEMPTS=30
-MIGRATE_RETRY_DELAY_SECONDS=2
-
-# Compilation (optional)
-COMPILE_MEMORY=1g
-COMPILE_CPUS=1.5
-MAX_CONCURRENT_BUILDS=5
-COMPILE_TIMEOUT=120
-STALE_BUILD_TTL_MINUTES=60
-RUN_COMPILE_RUNNER_IN_WEB=false
-WORKER_HEARTBEAT_KEY=compile:worker:heartbeat
-WORKER_HEARTBEAT_MAX_AGE_MS=30000
-WORKER_HEARTBEAT_INTERVAL_MS=5000
-ASYNC_COMPILE_RESULT_TTL_MINUTES=60
-ASYNC_COMPILE_MAX_CONCURRENT_BUILDS=5
-
-# Registration
-DISABLE_SIGNUP=false
-
-# Set to true if behind HTTPS (reverse proxy with TLS)
-SECURE_COOKIES=false
-
-# WebSocket — set prefix when behind a reverse proxy that routes /ws/* to the ws container
-# WS_PATH_PREFIX=/ws
-
-# WebSocket — override the URL the frontend connects to (usually auto-detected)
-# NEXT_PUBLIC_WS_URL=https://your-domain.com/ws
-
-# AI (optional fallback keys/models)
-# Users can also configure provider/model/key in Dashboard -> Settings.
-# If a user has not stored a key, these env vars are used as fallback.
-OPENAI_API_KEY=
-OPENROUTER_API_KEY=
-ANTHROPIC_API_KEY=
-CUSTOM_AI_API_KEY=
-
-# Optional endpoint overrides
-# OPENAI_BASE_URL=https://api.openai.com/v1
-# OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-# ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
-# CUSTOM_AI_BASE_URL=https://your-custom-llm-host/v1
-
-# Optional default models
-# AI_BUILD_FIX_MODEL=gpt-4o-mini
-# AI_LATEX_WRITER_MODEL=gpt-4o-mini
-# AI_BUILD_FIX_MODEL_OPENROUTER=openai/gpt-4o-mini
-# AI_LATEX_WRITER_MODEL_OPENROUTER=openai/gpt-4o-mini
-# AI_BUILD_FIX_MODEL_ANTHROPIC=claude-3-5-sonnet-latest
-# AI_LATEX_WRITER_MODEL_ANTHROPIC=claude-3-5-sonnet-latest
-
-# Platform deployments (Dokploy, Coolify, etc.) — disables host port binding
-# COMPOSE_FILE=docker-compose.yml
-```
-
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `3000` | Host port to expose the app on |
-| `WS_PORT` | `3001` | Host port to expose the WebSocket server on |
-| `SESSION_SECRET` | — | Secret key for signing/verifying JWT session cookies across `app` and `ws` (**required**) |
-| `DATABASE_URL` | *(bundled postgres)* | Override to use an external PostgreSQL instance |
-| `MIGRATE_MAX_ATTEMPTS` | `30` | Maximum migration retry attempts on startup |
-| `MIGRATE_RETRY_DELAY_SECONDS` | `2` | Delay between migration retry attempts |
-| `COMPILE_MEMORY` | `1g` | Memory limit per compile container |
-| `COMPILE_CPUS` | `1.5` | CPU limit per compile container |
-| `MAX_CONCURRENT_BUILDS` | `5` | Maximum simultaneous compilations |
-| `COMPILE_TIMEOUT` | `120` | Compilation timeout in seconds |
-| `STALE_BUILD_TTL_MINUTES` | `60` | Minimum age (in minutes) before queued/compiling builds are considered stale during startup cleanup |
-| `RUN_COMPILE_RUNNER_IN_WEB` | `false` | When `false`, web only enqueues/cancels jobs and a dedicated worker executes compiles; set `true` only for single-process/dev mode |
-| `WORKER_HEARTBEAT_KEY` | `compile:worker:heartbeat` | Redis key used by worker heartbeat and health checks |
-| `WORKER_HEARTBEAT_MAX_AGE_MS` | `30000` | Maximum heartbeat age before health check marks worker as stale |
-| `WORKER_HEARTBEAT_INTERVAL_MS` | `5000` | Worker heartbeat publish interval |
-| `ASYNC_COMPILE_RESULT_TTL_MINUTES` | `60` | Retention window for async one-shot compile artifacts before cleanup |
-| `ASYNC_COMPILE_MAX_CONCURRENT_BUILDS` | `5` | Max concurrent async one-shot compile jobs per worker |
-| `DISABLE_SIGNUP` | `false` | Set to `true` to disable new user registration |
-| `SECURE_COOKIES` | `false` | Set to `true` if serving over HTTPS (reverse proxy with TLS) |
-| `WS_PATH_PREFIX` | *(empty)* | Set to `/ws` when behind a reverse proxy that routes `/ws/*` to the ws container |
-| `NEXT_PUBLIC_WS_URL` | *(auto-detect)* | Override WebSocket server URL for the frontend (e.g. `wss://your-domain.com/ws`) |
-| `OPENAI_API_KEY` | *(unset)* | Optional fallback OpenAI key when user-level key is not configured |
-| `OPENROUTER_API_KEY` | *(unset)* | Optional fallback OpenRouter key when user-level key is not configured |
-| `ANTHROPIC_API_KEY` | *(unset)* | Optional fallback Anthropic key when user-level key is not configured |
-| `CUSTOM_AI_API_KEY` | *(unset)* | Optional fallback key for custom AI endpoint |
-| `OPENAI_BASE_URL` | OpenAI default | Optional OpenAI-compatible base URL override |
-| `OPENROUTER_BASE_URL` | OpenRouter default | Optional OpenRouter base URL override |
-| `ANTHROPIC_BASE_URL` | Anthropic default | Optional Anthropic base URL override |
-| `CUSTOM_AI_BASE_URL` | *(unset)* | Base URL for custom AI provider |
-| `AI_BUILD_FIX_MODEL` | provider default | Default model for build fixes when provider is OpenAI |
-| `AI_LATEX_WRITER_MODEL` | provider default | Default model for LaTeX writer when provider is OpenAI |
-| `AI_BUILD_FIX_MODEL_OPENROUTER` | provider default | Default build-fix model when provider is OpenRouter |
-| `AI_LATEX_WRITER_MODEL_OPENROUTER` | provider default | Default LaTeX-writer model when provider is OpenRouter |
-| `AI_BUILD_FIX_MODEL_ANTHROPIC` | provider default | Default build-fix model when provider is Anthropic |
-| `AI_LATEX_WRITER_MODEL_ANTHROPIC` | provider default | Default LaTeX-writer model when provider is Anthropic |
-| `COMPOSE_FILE` | *(unset)* | Set to `docker-compose.yml` to disable host port exposure (for platforms) |
-
----
-
-## 🔌 REST API
-
-MyEditor includes a full REST API for programmatic access. Generate an API key from the **Developer Settings** page in the dashboard, then use it in the `Authorization` header.
-
-### Quick Start
+Check that all of it is alive:
 
 ```bash
-# Submit async one-shot compile job
-curl -X POST https://your-instance.com/api/v1/compile \
-  -H "Authorization: Bearer bs_YOUR_API_KEY" \
-  -F "file=@document.tex"
-
-# Poll status
-curl https://your-instance.com/api/v1/compile/JOB_ID \
-  -H "Authorization: Bearer bs_YOUR_API_KEY" \
-  -H "Accept: application/json"
-
-# Fetch JSON output (base64 PDF + logs/errors)
-curl "https://your-instance.com/api/v1/compile/JOB_ID/output?format=json" \
-  -H "Authorization: Bearer bs_YOUR_API_KEY" \
-  -o output.json
-
-# Fetch raw PDF
-curl "https://your-instance.com/api/v1/compile/JOB_ID/output?format=pdf" \
-  -H "Authorization: Bearer bs_YOUR_API_KEY" \
-  --output output.pdf
+curl -s localhost:3000/api/health
 ```
 
-### API Endpoints
+That reports Redis, both compile queues, the worker heartbeat, the Docker
+socket, the compiler image, and the storage path separately, which makes it the
+fastest way to find out which piece is unhappy. It does not probe Postgres. If
+the database is down the app itself will tell you.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/v1/compile` | Submit async one-shot compile job |
-| `GET` | `/api/v1/compile/:jobId` | Poll async one-shot compile status |
-| `GET` | `/api/v1/compile/:jobId/output` | Fetch one-shot output (`format=json|base64|pdf`) |
-| `POST` | `/api/v1/compile/:jobId/cancel` | Cancel async one-shot compile job |
-| `GET` | `/api/v1/projects` | List all projects |
-| `POST` | `/api/v1/projects` | Create a project from template |
-| `GET` | `/api/v1/projects/:id` | Get project details + files |
-| `PUT` | `/api/v1/projects/:id` | Update project settings |
-| `DELETE` | `/api/v1/projects/:id` | Delete a project |
-| `GET` | `/api/v1/projects/:id/files` | List project files |
-| `POST` | `/api/v1/projects/:id/files` | Create a file |
-| `POST` | `/api/v1/projects/:id/files/upload` | Upload files (FormData) |
-| `GET` | `/api/v1/projects/:id/files/:fileId` | Get file content |
-| `PUT` | `/api/v1/projects/:id/files/:fileId` | Update file content |
-| `DELETE` | `/api/v1/projects/:id/files/:fileId` | Delete a file |
-| `POST` | `/api/v1/projects/:id/compile` | Trigger project compilation |
-| `GET` | `/api/v1/projects/:id/pdf` | Download compiled PDF |
-| `GET` | `/api/v1/projects/:id/builds` | Get build logs & status |
-| `GET` | `/api/v1/labels/` | Get all project labels associated with a user |
-| `PUT` | `/api/v1/labels/attach` | Attach a label to a project. This will create a new label if one doesn't already exist. |
-| `PUT` | `/api/v1/labels/detach` | Detach a label to a project. This will also delete the label if no projects are attached to it anymore. |
+Open http://localhost:3000 and create an account. Signup is open by default, so
+if the instance is only for you, set `DISABLE_SIGNUP=true` in `.env` and then
+`docker compose up -d` again. Plain `docker compose restart` will not do,
+because it does not re-read `.env`.
 
-### Dashboard AI Endpoints (Session Auth)
+### Optional: the CLI bridge
 
-These endpoints are intended for the signed-in dashboard experience and require session-cookie auth. API keys are not accepted.
+This is what lets the assistant run on your existing Claude or ChatGPT
+subscription instead of a metered API key. The app runs in a container, the CLI
+is logged in on your host, and the container has no business holding your login
+token. A small host process sits between them.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/ai/settings` | Get current AI settings (`enabled`, `buildFix`, `latexWriter`) for the signed-in user |
-| `PUT` | `/api/ai/settings` | Update AI enabled flag and provider/model config for build fixing and LaTeX writing |
-| `POST` | `/api/ai/fix-build` | Generate and apply strict line-based edits from recent compile errors/logs, then queue compile |
-
-### API Key Management
-
-- Navigate to **Dashboard → Developer Settings** (or the user menu → "API Keys")
-- Create up to 10 API keys per account
-- Keys can have optional expiration dates
-- Full key is shown only once at creation — store it securely
-- Revoke keys at any time from the dashboard
-
-Full interactive API documentation is available at `/dashboard/developers/docs` after signing in.
-
----
-
-## 🏗️ Architecture
-
-```
-myeditor/
-├── apps/
-│   ├── web/              # Next.js 15 app (frontend + API)
-│   ├── ws/               # Standalone WebSocket server (Socket.IO + Redis pub/sub)
-│   └── worker/           # Standalone build runner service (BullMQ + Redis)
-├── packages/
-│   └── shared/           # Shared types, constants, and utilities
-├── docker/
-│   ├── postgres/         # PostgreSQL init scripts
-│   └── texlive/          # LaTeX compiler Docker image
-├── templates/            # Built-in project templates
-├── docker-compose.yml           # Production deployment (one-click)
-├── docker-compose.override.yml  # Port exposure (auto-loaded, skip for platforms)
-└── docker-compose.dev.yml       # Development services (PostgreSQL + Redis)
-```
-
-### Tech Stack
-
-| Layer | Technology |
-|---|---|
-| **Frontend** | Next.js 15 (App Router), React 19, Tailwind CSS 4, CodeMirror 6, react-pdf |
-| **Backend** | Next.js API Routes, BullMQ compile queue, Redis pub/sub |
-| **Real-time** | Standalone Socket.IO server (WebSocket), Redis pub/sub bridge |
-| **Database** | PostgreSQL 16 with Drizzle ORM |
-| **Queue / Messaging** | BullMQ + Redis 7 (compile queue + pub/sub messaging) |
-| **Compilation** | Docker containers via dockerode (ephemeral, sandboxed, per-build) |
-| **LaTeX** | TeX Live (full distribution) with latexmk |
-| **Auth** | bcrypt password hashing, JWT-signed DB-backed sessions, API key auth (SHA-256) |
-
----
-
-## 🛠️ Development Setup
-
-If you want to contribute or run MyEditor locally for development:
-
-**1. Clone:**
+This path needs three things the Docker path does not: [pnpm](https://pnpm.io/installation)
+and Node 22.9 or newer on the host, and the `claude` or `codex` CLI installed
+and already logged in. The bridge runs on your machine, not in a container.
 
 ```bash
-git clone https://github.com/rishirochan/MyEditor.git
-cd MyEditor
+pnpm install
+sed -i '' "s|^CLI_BRIDGE_TOKEN=.*|CLI_BRIDGE_TOKEN=$(openssl rand -hex 32)|" .env
+
+pnpm bridge            # leave this running in its own terminal
+docker compose up -d   # in another terminal, so the container gets the token
 ```
 
-**2. Set up environment variables:**
+The token has to be at least 32 characters or the bridge refuses to start.
 
-Create `apps/web/.env`:
+The bridge listens on `0.0.0.0:4141`, accepts a fixed completion request shape,
+runs only the CLI you selected, and returns text. It cannot be told which
+command to run, which arguments to pass, or which directory to run in. Tokens
+stay on the host. Keep port 4141 off the public internet.
 
-```env
-DATABASE_URL=postgresql://backslash:devpassword@localhost:5432/backslash
-REDIS_URL=redis://localhost:6379
-STORAGE_PATH=/absolute/path/to/MyEditor/data
-TEMPLATES_PATH=../../templates
-COMPILER_IMAGE=myeditor-compiler
-SESSION_SECRET=dev-secret-change-in-production
-RUN_COMPILE_RUNNER_IN_WEB=false
+Details and endpoints: [apps/cli-bridge/README.md](apps/cli-bridge/README.md).
+
+### Run it as a local Mac app
+
+Two ways to live with this. Start it when you sit down to write, `docker compose
+up -d` and `docker compose stop`, and that is a perfectly good life. Or spend
+five minutes wiring it into the machine so it is just there, like Mail is there.
+If you are hacking on MyEditor itself, neither applies, use `pnpm dev` from
+[Development](#development) instead.
+
+**Give it a real window.** Open http://localhost:3000 in Chrome, then the three
+dot menu, `Cast, save and share`, `Install page as app`. You get a Dock icon and
+a standalone window with no tab strip and no address bar. Edge is the same menu.
+Safari 17 and later calls it `Add to Dock` under the Share button.
+
+Nothing to configure for this. Chrome picks up the app name and icon from the
+page.
+
+**Bring Docker up at login.** Docker Desktop, Settings, General, tick `Start
+Docker Desktop when you sign in`. Every long-running service in
+`docker-compose.yml` is already `restart: always`, so once the daemon is back
+the whole stack comes back with it. Nothing to add.
+
+**Bring the bridge up at login.** This one needs a launch agent, because the
+bridge is a plain host process. Save this as
+`~/Library/LaunchAgents/com.myeditor.cli-bridge.plist`. Three strings need
+replacing: the node binary, the path to your `.env`, and the path to
+`index.mjs`. Use `which node` for the first, since a launch agent does not get
+your shell's PATH and will not find a version-managed node. `CLI_BRIDGE_TOKEN`
+must already be set in that `.env`, or launchd will respawn a crashing bridge
+forever.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.myeditor.cli-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>--env-file-if-exists=/Users/you/MyEditor/.env</string>
+    <string>/Users/you/MyEditor/apps/cli-bridge/src/index.mjs</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/myeditor-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/myeditor-bridge.log</string>
+</dict>
+</plist>
 ```
-
-The WebSocket server needs the same session secret:
-
-```env
-# apps/ws/.env
-DATABASE_URL=postgresql://backslash:devpassword@localhost:5432/backslash
-REDIS_URL=redis://localhost:6379
-SESSION_SECRET=dev-secret-change-in-production
-```
-
-And the compile worker. It loads the web app's compile runner, so it needs the
-database too, and its `STORAGE_PATH` must be the **same absolute path** the web
-app uses — the worker bind-mounts that directory into each compile container, so
-a mismatch means the container cannot see the project files:
-
-```env
-# apps/worker/.env
-DATABASE_URL=postgresql://backslash:devpassword@localhost:5432/backslash
-REDIS_URL=redis://localhost:6379
-STORAGE_PATH=/absolute/path/to/MyEditor/data
-TEMPLATES_PATH=/absolute/path/to/MyEditor/templates
-COMPILER_IMAGE=myeditor-compiler
-```
-
-Local dev needs Docker Desktop (or Colima) with file sharing enabled for that
-directory. On Windows, use WSL2 — the compile path assumes a POSIX Docker socket.
-
-**3. One-time setup** (installs deps, builds the compiler image, starts Postgres + Redis, runs migrations):
 
 ```bash
-pnpm setup
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.myeditor.cli-bridge.plist
+curl localhost:4141/health
 ```
 
-**4. Start everything:**
+To stop it, `launchctl bootout gui/$(id -u)/com.myeditor.cli-bridge`. After
+editing the plist, bootout then bootstrap again. Logs land in
+`/tmp/myeditor-bridge.log`.
+
+The bridge looks for the CLIs in `/opt/homebrew/bin` and `/usr/local/bin` before
+falling back to PATH, so a Homebrew install is found without help. If yours
+lives anywhere else, add an `EnvironmentVariables` dict to the plist with
+`CLAUDE_CLI_PATH` and `CODEX_CLI_PATH` pointing at the binaries.
+
+Now the Dock icon works from a cold boot. Open the laptop, click MyEditor,
+write.
+
+### Running it somewhere real
+
+Behind a reverse proxy you need three things: route `/ws/*` to the ws container
+on port 3001 without stripping the prefix, set `WS_PATH_PREFIX=/ws`, and set
+`SECURE_COOKIES=true` if you terminate TLS. Nginx and Caddy examples are in
+[DOCS.md](DOCS.md#reverse-proxy--websocket-setup).
+
+On a platform that manages networking for you (Dokploy, Coolify, Portainer), add
+`COMPOSE_FILE=docker-compose.yml` to `.env` so Compose skips the override file
+that publishes ports on the host.
+
+To use a hosted database instead of the bundled one, set `DATABASE_URL`. The
+bundled Postgres will still start and sit idle.
+
+## When it breaks
+
+### The AI pane says the CLI bridge is unavailable
+
+The bridge is a host process, not a container. Nothing starts it for you.
+
+1. Is it running? `pnpm bridge` in a terminal on the host. Check with
+   `curl localhost:4141/health`.
+2. Is the token set in the repository root `.env`, and is it the same value the
+   container has? Env vars are read at container start, so after editing `.env`
+   you have to `docker compose up -d` again. Editing the file changes nothing
+   for a container that is already running.
+3. Requires Node 22 or newer. `node -v`.
+
+If the pane reports an HTTP status or a JSON error instead, the bridge is up and
+the failure is downstream. Read the actual message.
+
+### The bridge is running but says the CLI is not logged in
+
+Log in on the host, not in the container:
 
 ```bash
-pnpm dev
+claude auth status
+codex login status
 ```
 
-That one command starts Postgres + Redis (waits until healthy) and then runs the web app, WebSocket server, and compile worker in parallel with prefixed logs. `Ctrl+C` stops those three processes; Postgres and Redis keep running in the background until you run `pnpm stop`.
+If the CLI is installed somewhere unusual, set `CLAUDE_CLI_PATH` or
+`CODEX_CLI_PATH` to the binary.
 
-If one of the three exits with an error, pnpm stops the other two — just rerun `pnpm dev`. To iterate on a single app, run it on its own in a second terminal (for example `pnpm --filter @myeditor/worker dev`). The dev containers are pinned to the `myeditor-dev` Compose project, so they are shared rather than duplicated when you run from a git worktree or a second clone — and kept separate from the production stack, which uses `myeditor`.
+### `pnpm install` fails inside the Docker build
 
-If you prefer compile execution inside the web process during local development, set `RUN_COMPILE_RUNNER_IN_WEB=true` and run `pnpm --filter '!@myeditor/worker' -r --parallel dev` instead.
+The Dockerfiles run `pnpm install --frozen-lockfile`. If you changed a
+`package.json` without running `pnpm install` locally, the lockfile is stale and
+the build stops. Run `pnpm install` on the host, commit the updated
+`pnpm-lock.yaml`, then rebuild.
 
-**5.** Open [http://localhost:3000](http://localhost:3000)
+Warnings about ignored build scripts are expected. `.npmrc` sets
+`strict-dep-builds=false` so a new transitive dependency with a postinstall hook
+cannot break a deploy. The allowlist that actually decides which packages may
+run scripts is `onlyBuiltDependencies` in `package.json`.
 
-> `pnpm setup` runs `db:migrate`, not `db:push`. `db:push` writes `schema.ts`
-> straight to the database without recording a migration, so a database built
-> that way has no history — `db:migrate` will then refuse to run until you adopt
-> the existing schema with `DRIZZLE_BASELINE=latest`.
+### Builds sit in "queued" forever
 
-| Script | What it does |
-|---|---|
-| `pnpm dev` | Dev services + web + ws + worker, one terminal |
-| `pnpm setup` | One-time: install, build compiler image, start services, run migrations |
-| `pnpm services` | Just Postgres + Redis (`-d`, waits for healthy) |
-| `pnpm stop` | Stop the dev containers |
+The web process only enqueues jobs. A separate worker runs them, which is what
+`RUN_COMPILE_RUNNER_IN_WEB=false` means. If the worker is down, jobs queue and
+nothing happens.
 
----
-
-## ⚙️ Configuration
-
-### LaTeX Engines
-
-MyEditor supports the following LaTeX engines. Project default is `auto`, and one-shot or project-compilation API requests can override engine explicitly.
-
-`auto` detection rules:
-- `luacode`, `directlua`, `luatextra` → `lualatex`
-- `fontspec`, `unicode-math`, `polyglossia` → `xelatex`
-- otherwise → `pdflatex`
-
-| Engine | Flag |
-|---|---|
-| `auto` | Detect at runtime (`lualatex` / `xelatex` / `pdflatex`) |
-| `pdflatex` | `-pdf` |
-| `xelatex` | `-xelatex` |
-| `lualatex` | `-lualatex` |
-| `latex` | `-pdfdvi` |
-
-### Templates
-
-New projects can be initialized from the following built-in templates:
-
-| Template | Description |
-|---|---|
-| **Blank** | Empty document with minimal preamble |
-| **Article** | Standard academic article with sections |
-| **Thesis** | Multi-chapter thesis with bibliography |
-| **Beamer** | Slide presentation |
-| **Letter** | Formal letter |
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-| Shortcut | Action |
-|---|---|
-| `Ctrl+S` / `⌘+S` | Save current file and compile |
-| `Ctrl+Enter` / `⌘+Enter` | Compile project |
-
----
-
-## 📁 Project Structure
-
-```
-apps/web/src/
-├── app/                      # Next.js App Router pages
-│   ├── page.tsx              # Landing page
-│   ├── layout.tsx            # Root layout
-│   ├── globals.css           # Global styles & theme variables
-│   ├── (auth)/               # Auth pages (login, register)
-│   ├── api/                  # API routes
-│   │   ├── auth/             #   Authentication (login, logout, register, me)
-│   │   ├── projects/         #   Projects (CRUD, files, compile, PDF, logs)
-│   │   ├── keys/             #   API key management (create, list, revoke)
-│   │   └── v1/              #   Public REST API (API key authenticated)
-│   │       ├── compile/      #     One-shot TeX→PDF compilation
-│   │       └── projects/     #     Projects, files, builds, PDF download
-│   ├── dashboard/            # Project dashboard
-│   │   ├── page.tsx          #   Project list
-│   │   └── developers/       #   Developer settings & API docs
-│   └── editor/[projectId]/   # LaTeX editor page
-├── components/               # React components
-│   ├── AppHeader.tsx         # Global header with user menu & theme toggle
-│   ├── ThemeProvider.tsx     # Dark/light theme context provider
-│   ├── editor/               # Editor-specific components
-│   │   ├── BuildLogs.tsx     # Build output panel with error parsing
-│   │   ├── CodeEditor.tsx    # CodeMirror 6 LaTeX editor
-│   │   ├── EditorHeader.tsx  # Editor toolbar (compile, auto-compile toggle)
-│   │   ├── EditorLayout.tsx  # Main editor layout with resizable panels
-│   │   ├── EditorTabs.tsx    # Open file tab bar
-│   │   ├── FileTree.tsx      # File explorer sidebar
-│   │   └── PdfViewer.tsx     # PDF preview panel (react-pdf)
-│   └── ui/                   # Shared UI primitives (Radix UI)
-├── hooks/                    # Custom React hooks
-│   ├── useCompiler.ts        # Compilation logic
-│   ├── useEditorTabs.ts      # Tab management
-│   ├── useFileTree.ts        # File tree state
-│   ├── useProject.ts         # Project data fetching
-│   └── useWebSocket.ts       # WebSocket connection management
-├── lib/                      # Server-side libraries
-│   ├── auth/                 # Authentication (config, middleware, sessions, API keys)
-│   ├── compiler/             # Docker compilation engine
-│   │   ├── docker.ts         # Container management & compilation execution
-│   │   ├── logParser.ts      # LaTeX log parsing & error extraction
-│   │   ├── runner.ts         # Redis-backed compilation runner
-│   ├── db/                   # Database layer
-│   │   ├── index.ts          # Drizzle client
-│   │   ├── schema.ts         # Database schema (users, sessions, projects, files, builds, API keys)
-│   │   └── queries/          # Query helpers (users, projects, files)
-│   ├── storage/              # File storage abstraction
-│   ├── utils/                # Utilities (cn, errors, validation)
-│   └── websocket/            # Real-time communication
-│       ├── events.ts         # WebSocket event types & room helpers
-│       └── server.ts         # Redis pub/sub broadcast (publishes build updates)
-└── stores/                   # Zustand state stores
-    ├── buildStore.ts         # Build state management
-    └── editorStore.ts        # Editor state management
+```bash
+docker compose ps worker
+docker compose logs worker
 ```
 
----
+If the log says `node: .env: not found`, this is the missing
+`apps/worker/.env` from the setup steps. Create it and rebuild:
 
-## 🔒 Security
+```bash
+touch apps/worker/.env
+docker compose up -d --build worker
+```
 
-- **Sandboxed compilation** — Each LaTeX build runs in an isolated Docker container with:
-  - Network disabled (`NetworkDisabled: true`)
-  - All Linux capabilities dropped (`CapDrop: ["ALL"]`)
-  - `no-new-privileges` security option
-  - PID limit of 256
-  - Configurable memory and CPU limits
-  - Automatic container removal after build completion
-- **Authentication** — bcrypt password hashing with JWT-signed session cookies backed by DB session records (default 7-day expiry)
-- **API key auth** — Keys are SHA-256 hashed before storage. Only the prefix (`bs_...`) is stored in plaintext for identification.
-- **Input validation** — Zod schemas for all API inputs
-- **Path traversal protection** — File paths are validated and sanitized
+Otherwise read the log and check the heartbeat:
 
----
+```bash
+curl -s localhost:3000/api/health
+```
 
-## 🗄️ Database Schema
+For single-process local hacking you can set `RUN_COMPILE_RUNNER_IN_WEB=true`
+and skip the worker entirely. Do not do that in production.
 
-MyEditor uses PostgreSQL with Drizzle ORM. The schema includes:
+### Compiles fail because the container cannot see the project files
 
-- **users** — User accounts (email, name, password hash)
-- **sessions** — Server-side session records keyed by session ID (referenced from signed JWT cookies)
-- **projects** — LaTeX projects (name, description, engine, main file)
-- **project_files** — File metadata (path, MIME type, size, directory flag)
-- **builds** — Compilation history (status, engine, logs, duration, exit code)
-- **api_keys** — API keys (hashed key, prefix, usage stats, expiration)
-- **labels** — Labels for project organization (name, user)
-- **project_labels** — Relationship between projects and labels
+Only bites in local development. The worker bind-mounts `STORAGE_PATH` into each
+compile container, so `apps/web/.env` and `apps/worker/.env` have to name the
+same absolute path. A relative path or a mismatch means the compiler gets an
+empty directory.
 
-The database schema is automatically applied when deploying with Docker Compose.
+Docker Desktop also has to be allowed to share that directory. On Windows, run
+the whole thing under WSL2; the compile path assumes a POSIX Docker socket.
 
----
+### Build status never updates in the UI
 
-## � Acknowledgments
+The PDF only refreshes when the WebSocket connection is live. Two usual causes:
+`SESSION_SECRET` differs between the `app` and `ws` services so the ws server
+rejects the session cookie, or a reverse proxy is not forwarding the upgrade
+headers. Open the browser network tab and look for a failing `/socket.io`
+request.
 
-MyEditor is built on the shoulders of incredible open-source projects. We're grateful to every maintainer and contributor behind them.
+### Migrations refuse to run
 
-### Core Framework
+If the database was created with `db:push`, it has a schema but no migration
+history, and `db:migrate` will not guess which migrations to skip. Adopt the
+existing schema once:
 
-| Project | Description | License |
-|---|---|---|
-| [Next.js](https://nextjs.org/) | React framework for production — App Router, API routes, SSR | MIT |
-| [React](https://react.dev/) | UI library | MIT |
-| [TypeScript](https://www.typescriptlang.org/) | Typed JavaScript | Apache-2.0 |
-| [Tailwind CSS](https://tailwindcss.com/) | Utility-first CSS framework | MIT |
-| [Node.js](https://nodejs.org/) | JavaScript runtime | MIT |
+On a Docker install, run it through Compose. Postgres has no host port, so the
+host-side pnpm command cannot reach it:
 
-### Editor & UI
+```bash
+docker compose run --rm -e DRIZZLE_BASELINE=latest migrate
+```
 
-| Project | Description | License |
-|---|---|---|
-| [CodeMirror 6](https://codemirror.net/) | Extensible code editor component (syntax highlighting, autocomplete, search) | MIT |
-| [Radix UI](https://www.radix-ui.com/) | Unstyled, accessible UI primitives (dialog, dropdown, tooltip, tabs, etc.) | MIT |
-| [Lucide](https://lucide.dev/) | Beautiful open-source icon set | ISC |
-| [react-pdf](https://github.com/wojtekmaj/react-pdf) | PDF viewer for React (powered by PDF.js) | MIT |
-| [react-resizable-panels](https://github.com/bvaughn/react-resizable-panels) | Draggable resizable panel layouts | MIT |
-| [Zustand](https://github.com/pmndrs/zustand) | Lightweight state management | MIT |
-| [class-variance-authority](https://cva.style/) | Component variant utility | Apache-2.0 |
-| [clsx](https://github.com/lukeed/clsx) / [tailwind-merge](https://github.com/dcastil/tailwind-merge) | Class name utilities | MIT |
+In local development, where Postgres is published on 5432:
 
-### Backend & Database
+```bash
+DRIZZLE_BASELINE=latest pnpm --filter @myeditor/web db:migrate
+```
 
-| Project | Description | License |
-|---|---|---|
-| [PostgreSQL](https://www.postgresql.org/) | Relational database | PostgreSQL License |
-| [Drizzle ORM](https://orm.drizzle.team/) | TypeScript ORM with zero overhead | Apache-2.0 |
-| [postgres.js](https://github.com/porsager/postgres) | Fastest PostgreSQL client for Node.js | Unlicense |
-| [Redis](https://redis.io/) | In-memory data store for caching and queuing | BSD-3-Clause |
-| [BullMQ](https://bullmq.io/) | Redis-backed job queue for compilation workloads | MIT |
-| [ioredis](https://github.com/redis/ioredis) | Redis client for Node.js | MIT |
-| [Socket.IO](https://socket.io/) | Real-time WebSocket communication (standalone server) | MIT |
+Use `db:migrate`, not `db:push`. `pnpm setup` already does.
 
-### Compilation & Containers
+### Everyone's saved AI keys stopped working
 
-| Project | Description | License |
-|---|---|---|
-| [TeX Live](https://tug.org/texlive/) | Comprehensive TeX distribution | [Free Software](https://tug.org/texlive/copying.html) |
-| [latexmk](https://personal.psu.edu/~jcc8/software/latexmk/) | Automated LaTeX document generation | GPL-2.0 |
-| [Docker](https://www.docker.com/) | Container platform for sandboxed builds | Apache-2.0 |
-| [dockerode](https://github.com/apocas/dockerode) | Docker Remote API client for Node.js | Apache-2.0 |
+You rotated `SESSION_SECRET`. Stored provider keys are encrypted with a key
+derived from it, so rotating it makes them undecryptable. Session cookies die
+too. If you have to rotate, clear `user_ai_settings.build_api_key` and
+`writer_api_key` and have users re-enter them.
 
-### Auth & Security
+### Port 3000 is taken
 
-| Project | Description | License |
-|---|---|---|
-| [bcrypt.js](https://github.com/dcodeIO/bcrypt.js) | Password hashing | MIT |
-| [jose](https://github.com/panva/jose) | JWT signing and verification | MIT |
-| [Zod](https://zod.dev/) | TypeScript-first schema validation | MIT |
+Set `PORT` (and `WS_PORT`) in `.env`, then `docker compose up -d`.
 
-### Tooling
+### Login bounces back to the login page over HTTPS
 
-| Project | Description | License |
-|---|---|---|
-| [pnpm](https://pnpm.io/) | Fast, disk-efficient package manager | MIT |
-| [PostCSS](https://postcss.org/) | CSS transformations | MIT |
-| [Drizzle Kit](https://orm.drizzle.team/kit-docs/overview) | Database migration toolkit | Apache-2.0 |
-| [Archiver](https://github.com/archiverjs/node-archiver) | Streaming archive generation | MIT |
-| [uuid](https://github.com/uuidjs/uuid) | RFC-compliant UUID generation | MIT |
+Set `SECURE_COOKIES=true`. Without it the session cookie is issued without the
+`Secure` flag and the browser drops it.
 
----
+## Coming soon
 
-Special thanks to the entire open-source community. If we've used your project and missed listing it here, please open an issue — we'd love to add it.
+Not built yet. Listed here so you know where this is going.
 
----
+**Screenshot verification.** Right now an AI edit is graded by whether the
+document still compiles, which is a low bar. A clean build can still produce a
+figure that ran off the page or a table that silently lost a column. The plan is
+to render the affected PDF page, hand the image back to the model, and make it
+check its own work against what you asked for before it says done.
 
-## 📄 License
+**Update the document from a screenshot.** The other direction. Point at a
+rendered page, say the caption is too far from the figure or this equation
+should be numbered, and let the edit come back as LaTeX. Describing the fix in
+terms of the output is how people actually think about a document.
 
-This project is licensed under the [MIT License](LICENSE).
+**Worktree-style document history.** Git worktrees, for prose. Branch a chapter,
+let the assistant rewrite it in isolation, compile both versions, and read them
+side by side before anything touches your main draft. Right now an AI edit lands
+on the real file and your only move is undo. That is fine for a paragraph and
+wrong for a rewrite.
 
----
+Opinions on any of these are welcome in the issues.
 
-<p align="center">
-  Built with ❤️ and open-source software.
-</p>
+## Development
+
+Create `apps/web/.env`, `apps/ws/.env`, and `apps/worker/.env` first. There are
+no examples for these three and every one of them is required: `pnpm setup`
+fails at the migration step without the first, and `pnpm dev` crashes the ws
+server and the worker without the other two. Contents are in
+[DOCS.md](DOCS.md).
+
+Then `pnpm setup` once, `pnpm dev` after that. It starts Postgres and Redis,
+waits for them to be healthy, then runs the web app, ws server, and worker in
+parallel with prefixed logs. `pnpm stop` shuts the containers down.
+
+Full development setup, the environment variable reference, the API docs, the
+architecture, and the schema live in [DOCS.md](DOCS.md). Product intent is in
+[PRODUCT.md](PRODUCT.md), design tokens in [DESIGN.md](DESIGN.md).
+
+## License
+
+[MIT](LICENSE). Fork it, host it, sell it, no strings.
