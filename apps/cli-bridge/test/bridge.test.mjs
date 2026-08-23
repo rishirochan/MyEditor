@@ -44,3 +44,23 @@ test("completion validation rejects commands and unknown fields", () => {
     cwd: "/",
   }));
 });
+
+test("completion validation accepts real screenshots and rejects mismatched types", () => {
+  const request = {
+    provider: "codex-cli",
+    model: "gpt-5.6-sol",
+    effort: "low",
+    systemPrompt: "Return JSON.",
+    userPrompt: "Use this screenshot as context.",
+    images: [{
+      mediaType: "image/png",
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+    }],
+  };
+
+  assert.equal(validateCompletionBody(request), request);
+  assert.throws(() => validateCompletionBody({
+    ...request,
+    images: [{ ...request.images[0], mediaType: "image/jpeg" }],
+  }));
+});

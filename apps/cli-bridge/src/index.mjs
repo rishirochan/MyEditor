@@ -1,17 +1,21 @@
 import { spawn } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
-import { access, constants, readFile } from "node:fs/promises";
+import { access, constants, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const BODY_LIMIT_BYTES = 384 * 1024;
+const BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 const OUTPUT_LIMIT_BYTES = 2 * 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 120_000;
 const MAX_CONCURRENT_COMPLETIONS = 2;
 const ALLOWED_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "ultra"]);
 const MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/;
+const IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_IMAGES = 3;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024;
 
 const EFFORT_DESCRIPTIONS = {
   low: "Fast responses with lighter reasoning",
@@ -233,7 +237,7 @@ export function validateCompletionBody(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Request body must be a JSON object");
   }
-  const allowedKeys = new Set(["provider", "model", "effort", "systemPrompt", "userPrompt"]);
+  const allowedKeys = new Set(["provider", "model", "effort", "systemPrompt", "userPrompt", "images"]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) {
     throw new Error("Request body contains an unsupported field");
   }
@@ -253,7 +257,59 @@ export function validateCompletionBody(value) {
   if (typeof value.userPrompt !== "string" || !value.userPrompt.trim() || value.userPrompt.length > 262_144) {
     throw new Error("userPrompt must be a non-empty string no longer than 262,144 characters");
   }
+  validateImages(value.images);
   return value;
+}
+
+function validateImages(images) {
+  if (images === undefined) return;
+  if (!Array.isArray(images) || images.length > MAX_IMAGES) {
+    throw new Error(`images must contain at most ${MAX_IMAGES} items`);
+  }
+  let totalBytes = 0;
+  for (const image of images) {
+    if (!image || typeof image !== "object" || Array.isArray(image) ||
+        Object.keys(image).some((key) => key !== "mediaType" && key !== "data") ||
+        !IMAGE_MEDIA_TYPES.has(image.mediaType) || typeof image.data !== "string" ||
+        !isValidImage(image)) {
+      throw new Error("images contains invalid image data");
+    }
+    totalBytes += base64ByteLength(image.data);
+  }
+  if (totalBytes > MAX_IMAGE_TOTAL_BYTES) {
+    throw new Error("images must total 10 MB or less");
+  }
+}
+
+function base64ByteLength(data) {
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return (data.length * 3) / 4 - padding;
+}
+
+function isValidImage(image) {
+  if (!image.data || image.data.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data) ||
+      base64ByteLength(image.data) > MAX_IMAGE_BYTES) return false;
+  const bytes = Buffer.from(image.data.slice(0, 24), "base64");
+  if (image.mediaType === "image/jpeg") {
+    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  if (image.mediaType === "image/webp") {
+    return bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
+  }
+  return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+}
+
+function extractClaudeStreamResult(raw) {
+  for (const line of raw.trim().split("\n").reverse()) {
+    try {
+      const event = JSON.parse(line);
+      if (event.type === "result" && typeof event.result === "string") return event.result.trim();
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("Claude CLI returned no completion content");
 }
 
 async function complete(request) {
@@ -262,7 +318,9 @@ async function complete(request) {
     if (!binaryPath) throw new Error("Claude CLI is not installed on the Mac");
     const args = [
       "--print",
-      "--output-format", "text",
+      ...(request.images?.length ? ["--input-format", "stream-json"] : []),
+      "--output-format", request.images?.length ? "stream-json" : "text",
+      ...(request.images?.length ? ["--verbose"] : []),
       "--tools", "",
       "--safe-mode",
       "--disable-slash-commands",
@@ -274,7 +332,23 @@ async function complete(request) {
       "--model", request.model,
     ];
     if (request.effort) args.push("--effort", request.effort);
-    return runCompletion(binaryPath, args, request.userPrompt, "Claude");
+    const input = request.images?.length
+      ? `${JSON.stringify({
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              ...request.images.map((image) => ({
+                type: "image",
+                source: { type: "base64", media_type: image.mediaType, data: image.data },
+              })),
+              { type: "text", text: request.userPrompt },
+            ],
+          },
+        })}\n`
+      : request.userPrompt;
+    const text = await runCompletion(binaryPath, args, input, "Claude");
+    return request.images?.length ? extractClaudeStreamResult(text) : text;
   }
 
   const binaryPath = await resolveBinary("codex", process.env.CODEX_CLI_PATH);
@@ -287,12 +361,32 @@ async function complete(request) {
     "--ignore-rules",
     "--ignore-user-config",
     "--color", "never",
-    "--model", request.model,
   ];
-  if (request.effort) args.push("--config", `model_reasoning_effort=${JSON.stringify(request.effort)}`);
-  args.push("-");
-  const prompt = `${request.systemPrompt}\n\nUser request:\n${request.userPrompt}`;
-  return runCompletion(binaryPath, args, prompt, "Codex");
+  let imageDirectory;
+  try {
+    if (request.images?.length) {
+      imageDirectory = await mkdtemp(join(tmpdir(), "myeditor-images-"));
+      const extensions = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+      const imagePaths = [];
+      for (const [index, image] of request.images.entries()) {
+        const imagePath = join(imageDirectory, `screenshot-${index + 1}.${extensions[image.mediaType]}`);
+        await writeFile(imagePath, Buffer.from(image.data, "base64"), { mode: 0o600 });
+        imagePaths.push(imagePath);
+      }
+      args.push("--image", ...imagePaths);
+    }
+    args.push("--model", request.model);
+    if (request.effort) {
+      args.push("--config", `model_reasoning_effort=${JSON.stringify(request.effort)}`);
+    }
+    args.push("-");
+    const prompt = `${request.systemPrompt}\n\nUser request:\n${request.userPrompt}`;
+    return await runCompletion(binaryPath, args, prompt, "Codex");
+  } finally {
+    if (imageDirectory) {
+      await rm(imageDirectory, { recursive: true, force: true }).catch(() => {});
+    }
+  }
 }
 
 async function runCompletion(binaryPath, args, input, providerName) {
