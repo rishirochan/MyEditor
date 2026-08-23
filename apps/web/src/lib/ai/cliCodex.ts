@@ -4,6 +4,7 @@ import {
   isCliBridgeConfigured,
 } from "@/lib/ai/cliBridge";
 import { readCodexAuth } from "@/lib/ai/cliDetect";
+import type { AiImageInput } from "@/lib/ai/imageInput";
 
 const CODEX_TIMEOUT_MS = 45_000;
 const CODEX_RESPONSES_URL =
@@ -227,6 +228,7 @@ export async function completeWithCodexCli(params: {
   effort?: string | null;
   systemPrompt: string;
   userPrompt: string;
+  images?: AiImageInput[];
   onProgress?: CodexProgressCallback;
 }): Promise<string> {
   if (isCliBridgeConfigured()) {
@@ -241,6 +243,7 @@ export async function completeWithCodexCli(params: {
         effort: params.effort,
         systemPrompt: params.systemPrompt,
         userPrompt: params.userPrompt,
+        images: params.images,
       });
       params.onProgress?.({
         type: "status",
@@ -272,6 +275,10 @@ export async function completeWithCodexCli(params: {
               type: "input_text",
               text: params.userPrompt,
             },
+            ...(params.images?.map((image) => ({
+              type: "input_image",
+              image_url: `data:${image.mediaType};base64,${image.data}`,
+            })) ?? []),
           ],
         },
       ],

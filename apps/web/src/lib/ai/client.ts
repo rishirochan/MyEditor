@@ -1,4 +1,5 @@
 import type { AiModelSettings } from "@/lib/ai/types";
+import type { AiImageInput } from "@/lib/ai/imageInput";
 import { isCliProvider } from "@/lib/ai/types";
 import { resolveAiApiKey, resolveAiBaseUrl } from "@/lib/ai/settings";
 import { completeWithClaudeCli } from "@/lib/ai/cliClaude";
@@ -15,6 +16,7 @@ export interface StrictJsonCompletionParams {
   userPrompt: string;
   temperature?: number;
   maxTokens?: number;
+  images?: AiImageInput[];
   onProgress?: AiProgressCallback;
 }
 
@@ -77,7 +79,17 @@ async function callOpenAiCompatible(
           },
           {
             role: "user",
-            content: params.userPrompt,
+            content: params.images?.length
+              ? [
+                  { type: "text", text: params.userPrompt },
+                  ...params.images.map((image) => ({
+                    type: "image_url",
+                    image_url: {
+                      url: `data:${image.mediaType};base64,${image.data}`,
+                    },
+                  })),
+                ]
+              : params.userPrompt,
           },
         ],
       }),
@@ -129,7 +141,19 @@ async function callAnthropic(
         messages: [
           {
             role: "user",
-            content: params.userPrompt,
+            content: params.images?.length
+              ? [
+                  ...params.images.map((image) => ({
+                    type: "image",
+                    source: {
+                      type: "base64",
+                      media_type: image.mediaType,
+                      data: image.data,
+                    },
+                  })),
+                  { type: "text", text: params.userPrompt },
+                ]
+              : params.userPrompt,
           },
         ],
       }),
@@ -166,6 +190,7 @@ async function callCliProvider(
       effort: params.modelSettings.effort,
       systemPrompt: params.systemPrompt,
       userPrompt: params.userPrompt,
+      images: params.images,
     });
   }
 
@@ -174,6 +199,7 @@ async function callCliProvider(
     effort: params.modelSettings.effort,
     systemPrompt: params.systemPrompt,
     userPrompt: params.userPrompt,
+    images: params.images,
     onProgress: params.onProgress,
   });
 }

@@ -1,4 +1,5 @@
 import type { CliStatusSnapshot } from "@/lib/ai/cliDetect";
+import type { AiImageInput } from "@/lib/ai/imageInput";
 
 const STATUS_TIMEOUT_MS = 20_000;
 const COMPLETION_TIMEOUT_MS = 130_000;
@@ -85,6 +86,7 @@ export async function completeWithCliBridge(params: {
   effort?: string | null;
   systemPrompt: string;
   userPrompt: string;
+  images?: AiImageInput[];
 }): Promise<string> {
   const result = await requestBridge("/v1/complete", COMPLETION_TIMEOUT_MS, {
     method: "POST",

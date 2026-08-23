@@ -3,6 +3,13 @@ import path from "path";
 import { withAuth } from "@/lib/auth/middleware";
 import { completeStrictJson } from "@/lib/ai/client";
 import {
+  AI_IMAGE_MEDIA_TYPES,
+  MAX_AI_IMAGE_TOTAL_BYTES,
+  MAX_AI_IMAGES,
+  base64ByteLength,
+  isValidAiImage,
+} from "@/lib/ai/imageInput";
+import {
   aiTextEditSchema,
   applyTextEdit,
   normalizeFilePath,
@@ -21,6 +28,7 @@ import { z } from "zod";
 const MAX_AI_FILE_CHARS = 200_000;
 const MAX_PROMPT_FILE_CHARS = 32_000;
 const MAX_REASONING_SUMMARY_CHARS = 4_000;
+const MAX_AI_CHAT_BODY_BYTES = 16 * 1024 * 1024;
 
 const undoEditSchema = aiTextEditSchema.extend({
   startIndex: z.number().int().min(0),
@@ -30,6 +38,13 @@ const contextFileSchema = z.object({
   path: z.string().trim().min(1).max(1000),
   content: z.string().max(MAX_AI_FILE_CHARS).optional(),
 });
+
+const imageSchema = z
+  .object({
+    mediaType: z.enum(AI_IMAGE_MEDIA_TYPES),
+    data: z.string().min(1),
+  })
+  .refine(isValidAiImage, { message: "Invalid image data" });
 
 const requestSchema = z
   .object({
@@ -52,10 +67,31 @@ const requestSchema = z
         text: z.string().max(20000),
       })
       .optional(),
+    images: z.array(imageSchema).max(MAX_AI_IMAGES).optional(),
     undoEdits: z.array(undoEditSchema).min(1).max(40).optional(),
   })
   .refine((value) => Boolean(value.messages) !== Boolean(value.undoEdits), {
     message: "Provide either messages or undoEdits",
+  })
+  .superRefine((value, context) => {
+    const imageBytes = value.images?.reduce(
+      (total, image) => total + base64ByteLength(image.data),
+      0
+    );
+    if ((imageBytes ?? 0) > MAX_AI_IMAGE_TOTAL_BYTES) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["images"],
+        message: "Images must total 10 MB or less",
+      });
+    }
+    if (value.images?.length && !value.messages) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["images"],
+        message: "Images require a chat message",
+      });
+    }
   });
 
 const aiResponseSchema = z.object({
@@ -213,6 +249,14 @@ async function applyRequestedEdits(params: {
 
 export async function POST(request: NextRequest) {
   return withAuth(request, async (req, user) => {
+    const contentLength = Number(req.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_AI_CHAT_BODY_BYTES) {
+      return NextResponse.json(
+        { error: "AI chat request is too large" },
+        { status: 413 }
+      );
+    }
+
     let body: unknown = {};
     try {
       body = await req.json();
@@ -301,6 +345,12 @@ export async function POST(request: NextRequest) {
         type: "activity",
         message: `Reading ${contextFiles.map((file) => file.path).join(", ")}`,
       });
+      if (parsed.data.images?.length) {
+        emit({
+          type: "activity",
+          message: `Reading ${parsed.data.images.length} screenshot${parsed.data.images.length === 1 ? "" : "s"}`,
+        });
+      }
 
       if (parsed.data.undoEdits) {
         emit({ type: "activity", message: "Validating inverse edit" });
@@ -350,11 +400,13 @@ export async function POST(request: NextRequest) {
               ? { selection: parsed.data.selection }
               : {}),
             conversation: parsed.data.messages,
+            screenshotCount: parsed.data.images?.length ?? 0,
           },
           null,
           2
         ),
         temperature: 0.2,
+        images: parsed.data.images,
         onProgress: (event) => {
           if (event.type === "reasoning_summary") {
             if (reasoningSummaryChars === 0) {

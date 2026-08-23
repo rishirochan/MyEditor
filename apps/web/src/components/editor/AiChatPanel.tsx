@@ -1,8 +1,28 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
+import Image from "next/image";
 import { cn } from "@/lib/utils/cn";
-import { Sparkles, Send, X, Loader2, Undo2, Trash2 } from "lucide-react";
+import {
+  AI_IMAGE_MEDIA_TYPES,
+  MAX_AI_IMAGE_BYTES,
+  MAX_AI_IMAGE_TOTAL_BYTES,
+  MAX_AI_IMAGES,
+  isAiImageMediaType,
+  isValidAiImage,
+  type AiImageInput,
+} from "@/lib/ai/imageInput";
+import { parseStoredContextIds } from "./aiContextStorage";
+import {
+  ImagePlus,
+  Loader2,
+  Send,
+  Sparkles,
+  Trash2,
+  Undo2,
+  X,
+} from "lucide-react";
 
 const MAX_CONTEXT_FILES = 2;
 
@@ -33,6 +53,14 @@ interface AiMessage {
   undoing?: boolean;
   undone?: boolean;
   undoError?: string;
+  screenshotCount?: number;
+}
+
+interface PendingScreenshot {
+  id: string;
+  name: string;
+  size: number;
+  image: AiImageInput;
 }
 
 interface AiSelection {
@@ -70,6 +98,7 @@ interface AiChatPanelProps {
   getFileContent: (fileId: string) => string | undefined;
   ensureFileContent: (fileId: string) => void;
   pendingSelection: AiSelection | null;
+  configured: boolean | null;
   onClearSelection: () => void;
   onEditsApplied: (touchedPaths: string[]) => void;
 }
@@ -207,6 +236,50 @@ function fileName(filePath: string): string {
   return filePath.split("/").pop() ?? filePath;
 }
 
+function readScreenshot(file: File): Promise<PendingScreenshot> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Screenshot could not be read."));
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      const data = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      if (!isAiImageMediaType(file.type)) {
+        reject(new Error("Use a PNG, JPEG, or WebP screenshot."));
+        return;
+      }
+      const image = { mediaType: file.type, data };
+      if (!isValidAiImage(image)) {
+        reject(new Error(`${file.name} is not a valid image.`));
+        return;
+      }
+      resolve({ id: crypto.randomUUID(), name: file.name, size: file.size, image });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function screenshotError(
+  files: File[],
+  current: PendingScreenshot[]
+): string | null {
+  if (files.some((file) => !isAiImageMediaType(file.type))) {
+    return "Use PNG, JPEG, or WebP screenshots.";
+  }
+  if (files.some((file) => file.size > MAX_AI_IMAGE_BYTES)) {
+    return "Each screenshot must be 5 MB or smaller.";
+  }
+  if (current.length + files.length > MAX_AI_IMAGES) {
+    return `Attach up to ${MAX_AI_IMAGES} screenshots.`;
+  }
+  const totalBytes = [...current, ...files].reduce(
+    (total, item) => total + item.size,
+    0
+  );
+  return totalBytes > MAX_AI_IMAGE_TOTAL_BYTES
+    ? "Screenshots must total 10 MB or less."
+    : null;
+}
+
 function EditDiff({ edit }: { edit: AiEdit }) {
   return (
     <details
@@ -284,6 +357,7 @@ export function AiChatPanel({
   getFileContent,
   ensureFileContent,
   pendingSelection,
+  configured,
   onClearSelection,
   onEditsApplied,
 }: AiChatPanelProps) {
@@ -293,11 +367,20 @@ export function AiChatPanel({
   const [activity, setActivity] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [manualContext, setManualContext] = useState(false);
+  const [screenshots, setScreenshots] = useState<PendingScreenshot[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [isDraggingScreenshot, setIsDraggingScreenshot] = useState(false);
+  const [loadedContextProjectId, setLoadedContextProjectId] = useState<
+    string | null
+  >(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageIdRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
   const loadedKeyRef = useRef<string | null>(null);
   const storageKey = `ai-chat-v2:${projectId}`;
+  const contextStorageKey = `ai-context:${projectId}`;
+  const contextLoaded = loadedContextProjectId === projectId;
 
   useEffect(() => {
     if (loadedKeyRef.current !== storageKey) {
@@ -318,6 +401,43 @@ export function AiChatPanel({
   }, [messages, projectId, storageKey]);
 
   useEffect(() => {
+    setScreenshots([]);
+    setAttachmentError(null);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (contextLoaded) return;
+    let storedIds: string[] | null = null;
+    try {
+      storedIds = parseStoredContextIds(
+        window.localStorage.getItem(contextStorageKey),
+        new Set(files.map((file) => file.id))
+      );
+    } catch {
+      // Browser storage is optional.
+    }
+    if (storedIds) {
+      setSelectedIds(storedIds);
+      setManualContext(true);
+    } else {
+      setManualContext(false);
+    }
+    setLoadedContextProjectId(projectId);
+  }, [contextLoaded, contextStorageKey, files, projectId]);
+
+  useEffect(() => {
+    if (!contextLoaded) return;
+    try {
+      window.localStorage.setItem(
+        contextStorageKey,
+        JSON.stringify(selectedIds)
+      );
+    } catch {
+      // Browser storage is optional.
+    }
+  }, [contextLoaded, contextStorageKey, selectedIds]);
+
+  useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto";
@@ -325,6 +445,7 @@ export function AiChatPanel({
   }, [input]);
 
   useEffect(() => {
+    if (!contextLoaded) return;
     if (manualContext) {
       setSelectedIds((previous) => {
         const next = previous.filter((id) =>
@@ -341,7 +462,7 @@ export function AiChatPanel({
         ? previous
         : next
     );
-  }, [anchorFile, files, manualContext]);
+  }, [anchorFile, contextLoaded, files, manualContext]);
 
   useEffect(() => {
     if (!pendingSelection || !anchorFile) return;
@@ -418,6 +539,25 @@ export function AiChatPanel({
       if (previous.length >= MAX_CONTEXT_FILES) return previous;
       return [...previous, fileId];
     });
+  }
+
+  async function addScreenshots(files: FileList | File[]) {
+    const nextFiles = Array.from(files);
+    const validationError = screenshotError(nextFiles, screenshots);
+    if (validationError) {
+      setAttachmentError(validationError);
+      return;
+    }
+
+    try {
+      const added = await Promise.all(nextFiles.map(readScreenshot));
+      setScreenshots((previous) => [...previous, ...added]);
+      setAttachmentError(null);
+    } catch (error) {
+      setAttachmentError(
+        error instanceof Error ? error.message : "Screenshot could not be read."
+      );
+    }
   }
 
   function applyResult(
@@ -559,6 +699,7 @@ export function AiChatPanel({
       selectionLabel: selection
         ? `Re: lines ${selection.fromLine}–${selection.toLine}`
         : undefined,
+      screenshotCount: screenshots.length || undefined,
     };
     const history = [...messages, userMessage]
       .filter((message) => !message.error)
@@ -570,6 +711,8 @@ export function AiChatPanel({
 
     setMessages((previous) => [...previous, userMessage]);
     setInput("");
+    setScreenshots([]);
+    setAttachmentError(null);
     if (selection) onClearSelection();
     setSending(true);
     setActivity([]);
@@ -582,6 +725,9 @@ export function AiChatPanel({
           projectId,
           files: filesPayload(selectedFiles),
           messages: history,
+          ...(screenshots.length
+            ? { images: screenshots.map((screenshot) => screenshot.image) }
+            : {}),
           ...(selection ? { selection } : {}),
         }),
       });
@@ -622,6 +768,20 @@ export function AiChatPanel({
   }
 
   const folderLabel = folderPath ? `${folderPath}/` : "project root";
+
+  if (configured === false) {
+    return (
+      <div className="flex h-full items-center justify-center bg-bg-secondary">
+        <Link
+          href="/dashboard/settings"
+          className="inline-flex animate-pulse-soft items-center gap-2 rounded-md px-3 py-2 text-xs font-medium text-error"
+        >
+          <span aria-hidden className="h-2.5 w-2.5 bg-error" />
+          Configure
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col bg-bg-secondary">
@@ -731,22 +891,13 @@ export function AiChatPanel({
                     {message.selectionLabel}
                   </p>
                 )}
-                <MessageText text={message.content} />
-                {message.activity?.length ? (
-                  <details className="mt-1.5 border-t border-border-subtle pt-1 text-[10px] text-text-muted">
-                    <summary className="cursor-pointer font-medium transition-colors duration-150 ease-out hover:text-text-secondary">
-                      Activity ({message.activity.length})
-                    </summary>
-                    <ul
-                      className="mt-1 space-y-0.5 pl-3 font-mono"
-                      aria-label="AI activity log"
-                    >
-                      {message.activity.map((item, index) => (
-                        <li key={`${item}-${index}`}>{item}</li>
-                      ))}
-                    </ul>
-                  </details>
+                {message.screenshotCount ? (
+                  <p className="mb-1 text-[10px] text-text-muted">
+                    {message.screenshotCount} screenshot
+                    {message.screenshotCount === 1 ? "" : "s"} attached
+                  </p>
                 ) : null}
+                <MessageText text={message.content} />
                 {message.appliedEdits?.length ? (
                   <div className="relative mt-1.5 space-y-1.5 border-t border-border-subtle pt-1.5 text-[10px]">
                     {message.appliedEdits.map((edit, index) => (
@@ -779,6 +930,21 @@ export function AiChatPanel({
                       <p className="mt-1 text-error">{message.undoError}</p>
                     )}
                   </div>
+                ) : null}
+                {message.activity?.length ? (
+                  <details className="mt-1.5 border-t border-border-subtle pt-1 text-[10px] text-text-muted">
+                    <summary className="cursor-pointer font-medium transition-colors duration-150 ease-out hover:text-text-secondary">
+                      Activity ({message.activity.length})
+                    </summary>
+                    <ul
+                      className="mt-1 space-y-0.5 pl-3 font-mono"
+                      aria-label="AI activity log"
+                    >
+                      {message.activity.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </details>
                 ) : null}
                 {message.skippedEdits?.length ? (
                   <ul
@@ -860,42 +1026,120 @@ export function AiChatPanel({
 
       <form
         onSubmit={handleSubmit}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          if (!sending && hasContext) setIsDraggingScreenshot(true);
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={() => setIsDraggingScreenshot(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDraggingScreenshot(false);
+          if (!sending && hasContext) {
+            void addScreenshots(event.dataTransfer.files);
+          }
+        }}
         className={cn(
-          "flex shrink-0 items-end gap-2 px-3 py-2.5",
-          !pendingSelection && "border-t border-border"
+          "shrink-0 px-3 py-2.5 transition-colors duration-150 ease-out",
+          !pendingSelection && "border-t border-border",
+          isDraggingScreenshot && "bg-accent-subtle"
         )}
       >
-        <textarea
-          ref={inputRef}
-          rows={1}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
+        {screenshots.length > 0 ? (
+          <div
+            className="mb-2 flex gap-1.5 overflow-x-auto"
+            aria-label="Attached screenshots"
+          >
+            {screenshots.map((screenshot) => (
+              <div
+                key={screenshot.id}
+                className="relative h-12 w-16 shrink-0 overflow-hidden rounded-md border border-border bg-bg-inset"
+                title={screenshot.name}
+              >
+                <Image
+                  src={`data:${screenshot.image.mediaType};base64,${screenshot.image.data}`}
+                  alt={screenshot.name}
+                  fill
+                  unoptimized
+                  className="object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setScreenshots((previous) =>
+                      previous.filter((item) => item.id !== screenshot.id)
+                    )
+                  }
+                  aria-label={`Remove ${screenshot.name}`}
+                  className="absolute top-0.5 right-0.5 rounded bg-bg-elevated p-0.5 text-text-secondary shadow-xs hover:text-text-primary"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {attachmentError ? (
+          <p className="mb-1.5 text-[11px] text-error" role="alert">
+            {attachmentError}
+          </p>
+        ) : null}
+        <div className="flex items-end gap-2">
+          <input
+            ref={screenshotInputRef}
+            type="file"
+            accept={AI_IMAGE_MEDIA_TYPES.join(",")}
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              if (event.currentTarget.files) {
+                void addScreenshots(event.currentTarget.files);
+              }
+              event.currentTarget.value = "";
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => screenshotInputRef.current?.click()}
+            disabled={sending || !hasContext || screenshots.length >= MAX_AI_IMAGES}
+            aria-label="Add screenshots"
+            title="Add screenshots"
+            className="btn btn-ghost h-9 w-9 shrink-0 p-0"
+          >
+            <ImagePlus className="h-3.5 w-3.5" />
+          </button>
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            maxLength={8000}
+            disabled={sending || !hasContext}
+            placeholder={
+              hasContext ? "Ask about the selected files..." : "Select a file first"
             }
-          }}
-          maxLength={8000}
-          disabled={sending || !hasContext}
-          placeholder={
-            hasContext ? "Ask about the selected files..." : "Select a file first"
-          }
-          className="input min-h-9 flex-1 resize-none overflow-y-auto px-3 py-2 text-xs leading-5"
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || sending || !hasContext}
-          aria-label="Send message"
-          title="Send (Enter)"
-          className="btn btn-primary h-9 w-9 shrink-0 rounded-lg p-0"
-        >
-          {sending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Send className="h-3.5 w-3.5" />
-          )}
-        </button>
+            className="input min-h-9 flex-1 resize-none overflow-y-auto px-3 py-2 text-xs leading-5"
+          />
+          <button
+            type="submit"
+            disabled={!input.trim() || sending || !hasContext}
+            aria-label="Send message"
+            title="Send (Enter)"
+            className="btn btn-primary h-9 w-9 shrink-0 rounded-lg p-0"
+          >
+            {sending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </div>
       </form>
     </div>
   );

@@ -221,6 +221,8 @@ export function EditorLayout({
 
   const canUseAi = canEdit && !shareToken;
   const [aiTabActive, setAiTabActive] = useState(false);
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
+  const [compileRequestId, setCompileRequestId] = useState(0);
   const [aiPendingSelection, setAiPendingSelection] = useState<{
     fromLine: number;
     toLine: number;
@@ -238,9 +240,25 @@ export function EditorLayout({
   // When a save+compile is requested while already compiling, set this flag.
   // After the current build completes successfully, we'll trigger a recompile.
   const pendingRecompileRef = useRef(false);
-  // Track autoCompileEnabled via ref for use in WS callbacks
-  const autoCompileEnabledRef = useRef(autoCompileEnabled);
-  autoCompileEnabledRef.current = autoCompileEnabled;
+  useEffect(() => {
+    if (!canUseAi) return;
+
+    let cancelled = false;
+    fetch("/api/ai/readiness", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!cancelled) {
+          setAiConfigured(response.ok && data.configured === true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAiConfigured(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseAi]);
 
   // ─── Collaboration State ──────────────────────────
 
@@ -294,6 +312,7 @@ export function EditorLayout({
   const restoredTabStateRef = useRef(false);
   const restoredTabsProjectRef = useRef<string | null>(null);
   const fileLoadRetriesRef = useRef<Map<string, number>>(new Map());
+  const handledCompileRequestRef = useRef(0);
   const filesRef = useRef(initialFiles);
   filesRef.current = files;
 
@@ -1310,6 +1329,28 @@ export function EditorLayout({
     withShareToken,
   ]);
 
+  useEffect(() => {
+    if (
+      compileRequestId === 0 ||
+      compileRequestId === handledCompileRequestRef.current ||
+      compiling
+    ) {
+      return;
+    }
+    handledCompileRequestRef.current = compileRequestId;
+    handleCompile();
+  }, [compileRequestId, compiling, handleCompile]);
+
+  const handleDocumentSelect = useCallback(
+    (fileId: string, filePath: string | null) => {
+      handleFileSelect(fileId, filePath);
+      if (filesRef.current.some((file) => file.id === fileId && file.isDocument)) {
+        setCompileRequestId((requestId) => requestId + 1);
+      }
+    },
+    [handleFileSelect]
+  );
+
   // ─── AI Chat Panel ────────────────────────────────
 
   const handleAskAi = useCallback(
@@ -1361,9 +1402,12 @@ export function EditorLayout({
         saveTimeoutRef.current = null;
       }
 
-      touchedPaths.forEach((filePath) => {
+      const touchedFiles = touchedPaths.flatMap((filePath) => {
         const touched = filesRef.current.find((file) => file.path === filePath);
-        if (!touched) return;
+        return touched ? [touched] : [];
+      });
+
+      touchedFiles.forEach((touched) => {
         fileContentsRef.current.delete(touched.id);
         savedContentRef.current.delete(touched.id);
         setDirtyFileIds((prev) => {
@@ -1375,14 +1419,25 @@ export function EditorLayout({
         fetchFileContent(touched.id);
       });
 
-      if (!autoCompileEnabledRef.current) return;
-      if (compilingRef.current) {
+      const editedDocument = [...touchedFiles]
+        .reverse()
+        .find((file) => file.isDocument);
+      const switchesDocument = Boolean(
+        editedDocument && editedDocument.id !== activeDocumentIdRef.current
+      );
+      if (editedDocument && switchesDocument) {
+        activeDocumentIdRef.current = editedDocument.id;
+        activeDocumentPathRef.current = editedDocument.path;
+        setActiveDocumentId(editedDocument.id);
+      }
+
+      if (compilingRef.current && !switchesDocument) {
         pendingRecompileRef.current = true;
         return;
       }
-      handleCompile();
+      setCompileRequestId((requestId) => requestId + 1);
     },
-    [fetchFileContent, handleCompile]
+    [fetchFileContent]
   );
 
   // A selection chip only makes sense for the file it was made in
@@ -1848,7 +1903,7 @@ export function EditorLayout({
                   files={files}
                   activeFileId={activeFileId}
                   mainFilePath={mainFilePath ?? ""}
-                  onFileSelect={handleFileSelect}
+                  onFileSelect={handleDocumentSelect}
                   onMainFileChange={(nextMainFilePath) => {
                     const document = filesRef.current.find(
                       (file) => file.isDocument && file.path === nextMainFilePath
@@ -1878,7 +1933,7 @@ export function EditorLayout({
                         openFiles.find((f) => f.id === fileId)?.path ??
                         files.find((f) => f.id === fileId)?.path ??
                         null;
-                      handleFileSelect(fileId, filePath);
+                      handleDocumentSelect(fileId, filePath);
                     }}
                     onCloseTab={handleCloseTab}
                     aiTab={
@@ -1952,6 +2007,7 @@ export function EditorLayout({
                         getFileContent={getAiFileContent}
                         ensureFileContent={fetchFileContent}
                         pendingSelection={aiPendingSelection}
+                        configured={aiConfigured}
                         onClearSelection={() => setAiPendingSelection(null)}
                         onEditsApplied={handleAiEditsApplied}
                       />

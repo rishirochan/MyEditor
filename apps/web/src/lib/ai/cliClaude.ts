@@ -4,26 +4,44 @@ import {
   isCliBridgeConfigured,
 } from "@/lib/ai/cliBridge";
 import { resolveClaudeBinary } from "@/lib/ai/cliDetect";
+import type { AiImageInput } from "@/lib/ai/imageInput";
 
 const CLAUDE_TIMEOUT_MS = 45_000;
+
+export function extractClaudeStreamResult(raw: string): string {
+  for (const line of raw.trim().split("\n").reverse()) {
+    try {
+      const event = JSON.parse(line) as { type?: string; result?: unknown };
+      if (event.type === "result" && typeof event.result === "string") {
+        return event.result.trim();
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("Claude CLI returned no completion content");
+}
 
 export async function completeWithClaudeCli(params: {
   model: string;
   effort?: string | null;
   systemPrompt: string;
   userPrompt: string;
+  images?: AiImageInput[];
 }): Promise<string> {
   if (isCliBridgeConfigured()) {
     return completeWithCliBridge({ provider: "claude-cli", ...params });
   }
 
   const binaryPath = await resolveClaudeBinary();
+  const hasImages = Boolean(params.images?.length);
 
   const args = [
     "-p",
-    params.userPrompt,
+    ...(hasImages ? ["--input-format", "stream-json"] : [params.userPrompt]),
     "--output-format",
-    "text",
+    hasImages ? "stream-json" : "text",
+    ...(hasImages ? ["--verbose"] : []),
     "--tools",
     "",
     "--system-prompt",
@@ -40,8 +58,30 @@ export async function completeWithClaudeCli(params: {
   return new Promise<string>((resolve, reject) => {
     const child = spawn(binaryPath, args, {
       env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [hasImages ? "pipe" : "ignore", "pipe", "pipe"],
     });
+
+    if (hasImages) {
+      child.stdin?.end(
+        `${JSON.stringify({
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              ...(params.images?.map((image) => ({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: image.mediaType,
+                  data: image.data,
+                },
+              })) ?? []),
+              { type: "text", text: params.userPrompt },
+            ],
+          },
+        })}\n`
+      );
+    }
 
     let stdout = "";
     let stderr = "";
@@ -54,10 +94,10 @@ export async function completeWithClaudeCli(params: {
       reject(new Error(`Claude CLI timed out after ${CLAUDE_TIMEOUT_MS}ms`));
     }, CLAUDE_TIMEOUT_MS);
 
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
     });
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
     });
 
@@ -96,7 +136,11 @@ export async function completeWithClaudeCli(params: {
         return;
       }
 
-      resolve(text);
+      try {
+        resolve(hasImages ? extractClaudeStreamResult(text) : text);
+      } catch (error) {
+        reject(error);
+      }
     });
   });
 }

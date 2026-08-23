@@ -271,6 +271,17 @@ export async function detectCliStatus(): Promise<CliStatusSnapshot> {
   return { claude, codex, models };
 }
 
+export async function detectCliProviderStatus(
+  provider: "claude-cli" | "codex-cli"
+): Promise<CliProviderStatus> {
+  if (isCliBridgeConfigured()) {
+    const status = await getCliBridgeStatus();
+    return provider === "claude-cli" ? status.claude : status.codex;
+  }
+
+  return provider === "claude-cli" ? detectClaude() : detectCodex();
+}
+
 export async function startCliLogin(
   provider: "claude-cli" | "codex-cli"
 ): Promise<{ ok: boolean; message: string }> {
