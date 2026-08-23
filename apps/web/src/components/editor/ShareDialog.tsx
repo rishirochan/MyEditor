@@ -268,7 +268,7 @@ export function ShareDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="absolute inset-0 z-50 flex items-stretch justify-end p-3">
       <div
         className="absolute inset-0 bg-overlay animate-fade-in"
         onClick={onClose}
@@ -278,7 +278,7 @@ export function ShareDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="share-dialog-title"
-        className="animate-slide-up relative z-10 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-bg-secondary shadow-xl"
+        className="animate-slide-up relative z-10 flex min-h-0 w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-bg-secondary shadow-xl"
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border-subtle px-6 py-4">
           <div className="flex items-center gap-2.5">

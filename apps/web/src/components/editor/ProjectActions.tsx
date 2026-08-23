@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Share2, FileArchive } from "lucide-react";
 import {
   Tooltip,
@@ -28,6 +29,8 @@ export function ProjectActions({
   onShareUpdated,
 }: ProjectActionsProps) {
   const [shareOpen, setShareOpen] = useState(false);
+  const shareButtonRef = useRef<HTMLButtonElement>(null);
+  const pdfViewer = shareButtonRef.current?.closest("[data-pdf-viewer]");
 
   function handleDownloadZip() {
     const url = `/api/projects/${projectId}/download`;
@@ -66,6 +69,7 @@ export function ProjectActions({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                ref={shareButtonRef}
                 type="button"
                 onClick={() => setShareOpen(true)}
                 aria-label="Share project"
@@ -77,14 +81,18 @@ export function ProjectActions({
             <TooltipContent>Share project</TooltipContent>
           </Tooltip>
 
-          <ShareDialog
-            projectId={projectId}
-            projectName={projectName}
-            open={shareOpen}
-            onClose={() => setShareOpen(false)}
-            isOwner={isOwner}
-            onChanged={onShareUpdated}
-          />
+          {shareOpen && pdfViewer &&
+            createPortal(
+              <ShareDialog
+                projectId={projectId}
+                projectName={projectName}
+                open
+                onClose={() => setShareOpen(false)}
+                isOwner={isOwner}
+                onChanged={onShareUpdated}
+              />,
+              pdfViewer
+            )}
         </>
       )}
     </>

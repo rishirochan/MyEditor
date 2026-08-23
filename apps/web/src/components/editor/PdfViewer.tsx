@@ -308,7 +308,10 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="relative flex h-full min-h-0 flex-col bg-bg-tertiary">
+      <div
+        data-pdf-viewer
+        className="relative flex h-full min-h-0 flex-col bg-bg-tertiary"
+      >
         {/* Compile in flight: a hairline of progress, not a blocking spinner. */}
         {loading && (
           <div className="compilation-progress absolute inset-x-0 top-0 z-30" />
