@@ -109,10 +109,13 @@ const systemPrompt = [
   "3) oldText must be copied verbatim from that file's content, including whitespace.",
   "4) oldText must identify exactly one location. Include nearby source context when the short text repeats.",
   "5) newText is the complete replacement for oldText. Keep edits minimal and focused.",
-  "6) When a selection is provided, prefer editing that exact selected text.",
-  "7) If asked to undo and prior applied-edit metadata is present in the conversation, reverse that exact edit.",
-  "8) Never claim an edit succeeded; only describe the edit you are proposing.",
-  "9) Do not include markdown or extra keys.",
+  "6) When writing or revising resume content, prefer \\& over the word \"and\" by default to keep lines compact. Keep \"and\" only when the user explicitly requests it or when using \\& would make the text unclear.",
+  "7) contextFiles[].content is the sole source of truth for the document's current state. Conversation history and prior applied-edit metadata may explain intent, but they are not document content. Never restore, reapply, or overwrite text from chat history when the current file differs from it. Preserve all current wording, formatting, and structure unless the user's latest request explicitly changes it.",
+  "8) Treat direct requests such as \"add X\", \"remove Y\", and \"replace X with Y\" as a closed scope. Make only the requested edit. Do not add stylistic, grammatical, content, formatting, or other improvement edits unless the user asks for broader revision.",
+  "9) When a selection is provided, prefer editing that exact selected text.",
+  "10) If asked to undo and prior applied-edit metadata is present in the conversation, reverse that exact edit.",
+  "11) Never claim an edit succeeded; only describe the edit you are proposing.",
+  "12) Do not include markdown or extra keys.",
 ].join("\n");
 
 interface AppliedEdit {

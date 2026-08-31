@@ -202,8 +202,6 @@ export function EditorLayout({
   );
   const [buildActorName, setBuildActorName] = useState<string | null>(null);
   const [buildErrors, setBuildErrors] = useState<LogError[]>([]);
-  const [aiFixExplanation, setAiFixExplanation] = useState<string | null>(null);
-  const [fixingWithAi, setFixingWithAi] = useState(false);
   const [buildLogsExpanded, setBuildLogsExpanded] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
 
@@ -228,6 +226,7 @@ export function EditorLayout({
     toLine: number;
     text: string;
   } | null>(null);
+  const [aiPendingPrompt, setAiPendingPrompt] = useState<string | null>(null);
 
   // ─── Compile Guards (prevent build pileup) ────────
 
@@ -1152,8 +1151,7 @@ export function EditorLayout({
       const willCompile = Boolean(
         shouldCompile &&
           activeDocumentPathRef.current &&
-          !compilingRef.current &&
-          !fixingWithAi
+          !compilingRef.current
       );
 
       if (willCompile) {
@@ -1220,7 +1218,6 @@ export function EditorLayout({
       resetCompileState,
       saveViewPositionsBeforeBuild,
       startBuildPolling,
-      fixingWithAi,
       withShareToken,
     ]
   );
@@ -1280,12 +1277,10 @@ export function EditorLayout({
 
   const handleCompile = useCallback(async () => {
     if (!canEdit) return;
-    if (fixingWithAi) return;
     if (compilingRef.current) return;
     const mainFile = activeDocumentPathRef.current;
     if (!mainFile) return;
 
-    setAiFixExplanation(null);
     saveViewPositionsBeforeBuild();
     beginCompileTracking();
     compilingRef.current = true;
@@ -1321,7 +1316,6 @@ export function EditorLayout({
   }, [
     beginCompileTracking,
     canEdit,
-    fixingWithAi,
     project.id,
     resetCompileState,
     saveViewPositionsBeforeBuild,
@@ -1445,132 +1439,14 @@ export function EditorLayout({
     setAiPendingSelection(null);
   }, [activeFileId]);
 
-  const handleFixWithAi = useCallback(async () => {
-    if (!canEdit) return;
-    if (fixingWithAi) return;
-    if (compilingRef.current) return;
-    if (!mainFilePath) return;
-
-    const activeFilePath =
-      activeFileId
-        ? files.find((file) => file.id === activeFileId)?.path ?? mainFilePath
-        : mainFilePath;
-
-    setFixingWithAi(true);
-    setAiFixExplanation(null);
-
-    // Same reason as handleAiEditsApplied: a queued debounce save would undo
-    // the AI's edits once savedContentRef is invalidated below.
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = null;
-    }
-
-    try {
-      // Persist current editor buffer before requesting AI fixes.
-      if (activeFileId) {
-        await handleSave(activeFileContent, false);
-      }
-
-      const res = await fetch("/api/ai/fix-build", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: project.id,
-          mainFile: mainFilePath,
-          activeFilePath,
-          activeFileContent,
-          errorLimit: 8,
-          recentBuildLimit: 3,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setBuildStatus("error");
-        setBuildLogs(data.error || "AI fix failed");
-        resetCompileState();
-        return;
-      }
-
-      if (typeof data.explanation === "string" && data.explanation.trim().length > 0) {
-        setAiFixExplanation(data.explanation);
-      }
-
-      const touchedFilePaths = new Set<string>(
-        Array.isArray(data.appliedEdits)
-          ? data.appliedEdits
-              .map((edit: { filePath?: string }) => edit.filePath)
-              .filter((filePath: unknown): filePath is string => typeof filePath === "string")
-          : []
-      );
-
-      if (touchedFilePaths.size > 0) {
-        touchedFilePaths.forEach((filePath) => {
-          const touched = files.find((file) => file.path === filePath);
-          if (!touched) return;
-          fileContentsRef.current.delete(touched.id);
-          savedContentRef.current.delete(touched.id);
-        });
-      }
-
-      if (activeFileId) {
-        fetchFileContent(activeFileId);
-      }
-
-      const compileStatusCode =
-        typeof data.compile?.statusCode === "number" ? data.compile.statusCode : 500;
-      if (compileStatusCode >= 400) {
-        setBuildStatus("error");
-        const compileError =
-          typeof data.compile?.result?.error === "string"
-            ? data.compile.result.error
-            : "AI fixes were applied, but compile could not be queued.";
-        setBuildLogs(compileError);
-        resetCompileState();
-        return;
-      }
-
-      const queuedBuildId = data.compile?.result?.buildId;
-      if (typeof queuedBuildId !== "string") {
-        setBuildStatus("error");
-        setBuildLogs("AI fixes were applied, but compile did not return a build ID.");
-        resetCompileState();
-        return;
-      }
-
-      setBuildActorName("You");
-      setBuildStatus("queued");
-      setBuildErrors([]);
-      setPdfLoading(true);
-      setCompiling(true);
-      beginCompileTracking(queuedBuildId);
-      compilingRef.current = true;
-      pendingRecompileRef.current = false;
-      saveViewPositionsBeforeBuild();
-      startBuildPolling();
-    } catch {
-      setBuildStatus("error");
-      setBuildLogs("AI fix failed. Please try again.");
-      resetCompileState();
-    } finally {
-      setFixingWithAi(false);
-    }
-  }, [
-    activeFileContent,
-    activeFileId,
-    beginCompileTracking,
-    canEdit,
-    fetchFileContent,
-    files,
-    fixingWithAi,
-    handleSave,
-    mainFilePath,
-    project.id,
-    resetCompileState,
-    saveViewPositionsBeforeBuild,
-    startBuildPolling,
-  ]);
+  const handleFixWithAi = useCallback(() => {
+    setAiPendingPrompt(
+      `Fix this LaTeX build failure. Make the smallest safe edit, then explain what changed.\n\nBuild log:\n${buildLogs
+        .trim()
+        .slice(-7000)}`
+    );
+    setAiTabActive(true);
+  }, [buildLogs]);
 
   const handleCancelBuild = useCallback(async () => {
     if (!canEdit) return;
@@ -2007,8 +1883,10 @@ export function EditorLayout({
                         getFileContent={getAiFileContent}
                         ensureFileContent={fetchFileContent}
                         pendingSelection={aiPendingSelection}
+                        pendingPrompt={aiPendingPrompt}
                         configured={aiConfigured}
                         onClearSelection={() => setAiPendingSelection(null)}
+                        onClearPrompt={() => setAiPendingPrompt(null)}
                         onEditsApplied={handleAiEditsApplied}
                       />
                     </div>
@@ -2060,9 +1938,7 @@ export function EditorLayout({
               actorName={buildActorName}
               onErrorClick={handleErrorClick}
               canFixWithAi={canEdit && !shareToken}
-              fixingWithAi={fixingWithAi}
               onFixWithAi={handleFixWithAi}
-              aiExplanation={aiFixExplanation}
               expanded={buildLogsExpanded}
               onExpandedChange={setBuildLogsExpanded}
             />

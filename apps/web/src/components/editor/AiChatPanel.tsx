@@ -98,8 +98,10 @@ interface AiChatPanelProps {
   getFileContent: (fileId: string) => string | undefined;
   ensureFileContent: (fileId: string) => void;
   pendingSelection: AiSelection | null;
+  pendingPrompt: string | null;
   configured: boolean | null;
   onClearSelection: () => void;
+  onClearPrompt: () => void;
   onEditsApplied: (touchedPaths: string[]) => void;
 }
 
@@ -357,8 +359,10 @@ export function AiChatPanel({
   getFileContent,
   ensureFileContent,
   pendingSelection,
+  pendingPrompt,
   configured,
   onClearSelection,
+  onClearPrompt,
   onEditsApplied,
 }: AiChatPanelProps) {
   const [messages, setMessages] = useState<AiMessage[]>([]);
@@ -443,6 +447,19 @@ export function AiChatPanel({
     el.style.height = "auto";
     el.style.height = `${Math.max(el.scrollHeight, 36)}px`;
   }, [input]);
+
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    setInput(pendingPrompt);
+    onClearPrompt();
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(
+        pendingPrompt.length,
+        pendingPrompt.length
+      );
+    });
+  }, [onClearPrompt, pendingPrompt]);
 
   useEffect(() => {
     if (!contextLoaded) return;

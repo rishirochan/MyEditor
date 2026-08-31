@@ -31,9 +31,7 @@ interface BuildLogsProps {
   actorName?: string | null;
   onErrorClick?: (file: string, line: number) => void;
   canFixWithAi?: boolean;
-  fixingWithAi?: boolean;
   onFixWithAi?: () => void;
-  aiExplanation?: string | null;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }
@@ -99,9 +97,7 @@ export function BuildLogs({
   actorName = null,
   onErrorClick,
   canFixWithAi = false,
-  fixingWithAi = false,
   onFixWithAi,
-  aiExplanation = null,
   expanded,
   onExpandedChange,
 }: BuildLogsProps) {
@@ -178,15 +174,10 @@ export function BuildLogs({
             <button
               type="button"
               onClick={onFixWithAi}
-              disabled={fixingWithAi}
               className="btn btn-secondary gap-1 px-2 py-1 text-[11px]"
             >
-              {fixingWithAi ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Sparkles className="h-3 w-3 text-accent" />
-              )}
-              {fixingWithAi ? "Fixing..." : "Fix with AI"}
+              <Sparkles className="h-3 w-3 text-accent" />
+              Fix with AI
             </button>
           )}
           <button
@@ -208,15 +199,6 @@ export function BuildLogs({
       {/* Expanded content */}
       {isExpanded && (
         <div className="min-h-0 flex-1 overflow-auto">
-          {aiExplanation && (
-            <div className="border-b border-border-subtle bg-accent-subtle px-3 py-2">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-accent">
-                AI fix summary
-              </p>
-              <p className="mt-1 text-xs text-text-secondary">{aiExplanation}</p>
-            </div>
-          )}
-
           {/* Diagnostics, errors first */}
           {sortedErrors.length > 0 && (
             <div className="border-b border-border-subtle">
