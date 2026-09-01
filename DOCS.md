@@ -311,7 +311,6 @@ These endpoints are intended for the signed-in dashboard experience and require 
 |---|---|---|
 | `GET` | `/api/ai/settings` | Get current AI settings (`enabled`, `buildFix`, `latexWriter`) for the signed-in user |
 | `PUT` | `/api/ai/settings` | Update AI enabled flag and provider/model config for build fixing and LaTeX writing |
-| `POST` | `/api/ai/fix-build` | Generate and apply strict line-based edits from recent compile errors/logs, then queue compile |
 
 ### API Key Management
 

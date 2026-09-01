@@ -931,54 +931,6 @@ curl "${BASE}/compile/JOB_ID/output?format=pdf" \\
         notes:
           "Provider options: openai, openrouter, anthropic, custom, claude-cli, codex-cli. Custom provider requires endpoint. claude-cli/codex-cli use local CLI logins on the server machine (no API key).",
       },
-      {
-        method: "POST",
-        path: `${APP_BASE}/ai/fix-build`,
-        description:
-          "Generate strict-JSON line edits from recent compile errors/logs, apply edits via file API, then queue compile.",
-        auth: true,
-        body: {
-          projectId: {
-            type: "string (uuid)",
-            required: true,
-            description: "Project to fix.",
-          },
-          activeFilePath: {
-            type: "string",
-            required: false,
-            description:
-              "Active file path hint for the LLM context. Falls back to project main file if omitted.",
-          },
-          activeFileContent: {
-            type: "string",
-            required: false,
-            description:
-              "Optional unsaved active editor content to include in prompt context.",
-          },
-          errorLimit: {
-            type: "number",
-            required: false,
-            description: "Top compile errors to send to model (1-20, default 8).",
-          },
-          recentBuildLimit: {
-            type: "number",
-            required: false,
-            description:
-              "Recent build logs to include for context (1-5, default 3).",
-          },
-        },
-        response: `{
-  "explanation": "Added missing package and fixed undefined command in main.tex.",
-  "appliedEdits": [{ "filePath": "main.tex", "replaceFrom": 12, "replaceTo": 12 }],
-  "skippedEdits": [],
-  "compile": {
-    "statusCode": 202,
-    "result": { "buildId": "uuid", "status": "queued" }
-  }
-}`,
-        notes:
-          "Requires editor/owner access and AI enabled in settings. Viewers are denied. API key auth is not supported for this endpoint.",
-      },
     ],
   },
   ];
