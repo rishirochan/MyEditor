@@ -209,6 +209,13 @@ async function collectDroppedFiles(
   return result;
 }
 
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tagName = target.tagName;
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
 // ─── Context Menu ───────────────────────────────────
 
 interface ContextMenuProps {
@@ -731,6 +738,8 @@ export function FileTree({
     if (!container || readOnly) return;
 
     function handleKeyDown(e: KeyboardEvent) {
+      if (isEditableKeyboardTarget(e.target)) return;
+
       if (e.key === "Delete" || e.key === "Backspace") {
         if (selectedFileIds.size > 0) {
           e.preventDefault();
