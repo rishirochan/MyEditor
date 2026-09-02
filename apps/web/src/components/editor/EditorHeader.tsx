@@ -174,6 +174,9 @@ export function EditorHeader({
   const [loadingProjects, setLoadingProjects] = useState(false);
 
   const hasOtherUsers = presenceUsers.some((u) => u.userId !== currentUserId);
+  const buildInFlight = buildStatus === "compiling" || buildStatus === "queued";
+  const buildBusy = compiling || buildInFlight;
+  const canCancelBuild = buildInFlight && Boolean(onCancelBuild);
 
   async function fetchProjects() {
     setLoadingProjects(true);
@@ -287,51 +290,55 @@ export function EditorHeader({
         {/* Build cluster: run it, stop it, automate it. One group. */}
         {canEdit && (
           <div className="flex items-center gap-1">
+            {/* One button for the whole build: it starts, reports, and stops. */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={onCompile}
-                  disabled={compiling || !documentPath}
-                  className="btn btn-primary h-7 px-2.5 text-xs"
+                  onClick={canCancelBuild ? onCancelBuild : onCompile}
+                  disabled={canCancelBuild ? false : compiling || !documentPath}
+                  aria-label={canCancelBuild ? "Cancel build" : "Compile"}
+                  className="btn btn-primary group h-7 px-2.5 text-xs"
                 >
-                  {compiling ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {buildBusy ? (
+                    <>
+                      <Loader2
+                        className={cn(
+                          "h-3.5 w-3.5 animate-spin",
+                          canCancelBuild && "group-hover:hidden"
+                        )}
+                      />
+                      {canCancelBuild && (
+                        <Square className="hidden h-3 w-3 fill-current group-hover:block" />
+                      )}
+                    </>
                   ) : (
                     <Play className="h-3.5 w-3.5" />
                   )}
-                  <span className="hidden sm:inline">
-                    {compiling ? "Compiling" : "Compile"}
+                  <span className="hidden min-w-[3.75rem] text-center sm:inline-block">
+                    {canCancelBuild ? (
+                      <>
+                        <span className="group-hover:hidden">Compiling</span>
+                        <span className="hidden group-hover:inline">Cancel</span>
+                      </>
+                    ) : buildBusy ? (
+                      "Compiling"
+                    ) : (
+                      "Compile"
+                    )}
                   </span>
                 </button>
               </TooltipTrigger>
               <TooltipContent>
                 <p>
-                  {documentPath
-                    ? `Compile ${documentPath} (Ctrl+Enter)`
-                    : "Select or create a document first"}
+                  {canCancelBuild
+                    ? "Cancel build"
+                    : documentPath
+                      ? `Compile ${documentPath} (Ctrl+Enter)`
+                      : "Select or create a document first"}
                 </p>
               </TooltipContent>
             </Tooltip>
-
-            {(buildStatus === "compiling" || buildStatus === "queued") &&
-              onCancelBuild && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={onCancelBuild}
-                      className="btn btn-secondary h-7 px-2.5 text-xs"
-                    >
-                      <Square className="h-3 w-3" />
-                      <span className="hidden sm:inline">Cancel</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Cancel build</p>
-                  </TooltipContent>
-                </Tooltip>
-              )}
 
             {/* Auto-compile: a labelled switch, not a mystery pill */}
             <Tooltip>
