@@ -31,12 +31,14 @@ import { PasswordInput } from "@/components/ui/password-input";
 import {
   defaultModelForProvider,
   modelsForProvider,
+  providerLabel,
 } from "@/lib/ai/models";
 import type { AiProvider } from "@/lib/ai/types";
 import { isCliProvider } from "@/lib/ai/types";
 import {
   CLAUDE_LATEST_FAMILY,
   CODEX_LATEST_FALLBACK,
+  effortLabel,
 } from "@/lib/ai/cliModelCatalog";
 
 interface UserInfo {
@@ -115,43 +117,6 @@ function defaultAiModelState(): AiModelFormState {
     endpoint: null,
     apiKeySet: false,
   });
-}
-
-function providerLabel(provider: AiProvider): string {
-  switch (provider) {
-    case "openrouter":
-      return "OpenRouter";
-    case "anthropic":
-      return "Anthropic";
-    case "custom":
-      return "Custom endpoint";
-    case "claude-cli":
-      return "Claude CLI";
-    case "codex-cli":
-      return "Codex CLI";
-    case "openai":
-    default:
-      return "OpenAI";
-  }
-}
-
-function effortLabel(effort: string): string {
-  switch (effort) {
-    case "low":
-      return "Low";
-    case "medium":
-      return "Med";
-    case "high":
-      return "High";
-    case "xhigh":
-      return "XHigh";
-    case "max":
-      return "Max";
-    case "ultra":
-      return "Ultra";
-    default:
-      return effort;
-  }
 }
 
 function resolveEffortForModel(

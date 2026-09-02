@@ -25,6 +25,24 @@ export const MODEL_OPTIONS: Record<
   "codex-cli": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
 };
 
+export function providerLabel(provider: AiProvider): string {
+  switch (provider) {
+    case "openrouter":
+      return "OpenRouter";
+    case "anthropic":
+      return "Anthropic";
+    case "custom":
+      return "Custom endpoint";
+    case "claude-cli":
+      return "Claude CLI";
+    case "codex-cli":
+      return "Codex CLI";
+    case "openai":
+    default:
+      return "OpenAI";
+  }
+}
+
 export function defaultModelForProvider(provider: AiProvider): string {
   switch (provider) {
     case "claude-cli":
