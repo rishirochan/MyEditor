@@ -212,6 +212,8 @@ export function EditorLayout({
     }
     return true;
   });
+  const autoCompileEnabledRef = useRef(autoCompileEnabled);
+  autoCompileEnabledRef.current = autoCompileEnabled;
 
   const [dirtyFileIds, setDirtyFileIds] = useState<Set<string>>(new Set());
 
@@ -1259,10 +1261,10 @@ export function EditorLayout({
       if (!activeFileId || !hasUnsavedChanges) return;
 
       saveTimeoutRef.current = setTimeout(() => {
-        handleSave(content, autoCompileEnabled);
+        handleSave(content, autoCompileEnabledRef.current);
       }, 1000);
     },
-    [handleSave, activeFileId, autoCompileEnabled, canEdit]
+    [handleSave, activeFileId, canEdit]
   );
 
   const handleImmediateSave = useCallback(() => {
@@ -1322,6 +1324,20 @@ export function EditorLayout({
     startBuildPolling,
     withShareToken,
   ]);
+
+  const handleAutoCompileToggle = useCallback(
+    (enabled: boolean) => {
+      setAutoCompileEnabled(enabled);
+      autoCompileEnabledRef.current = enabled;
+      if (!enabled) return;
+      if (activeFileId && dirtyFileIds.has(activeFileId)) {
+        handleImmediateSave();
+        return;
+      }
+      void handleCompile();
+    },
+    [activeFileId, dirtyFileIds, handleCompile, handleImmediateSave]
+  );
 
   useEffect(() => {
     if (
@@ -1745,7 +1761,7 @@ export function EditorLayout({
         compiling={compiling}
         onCompile={handleCompile}
         autoCompileEnabled={autoCompileEnabled}
-        onAutoCompileToggle={(enabled) => setAutoCompileEnabled(enabled)}
+        onAutoCompileToggle={handleAutoCompileToggle}
         buildStatus={buildStatus}
         onCancelBuild={handleCancelBuild}
         presenceUsers={presenceUsers}

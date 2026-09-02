@@ -1,3 +1,4 @@
+import { createTimeoutSignal } from "@/lib/ai/abort";
 import type { AiModelSettings } from "@/lib/ai/types";
 import type { AiImageInput } from "@/lib/ai/imageInput";
 import { isCliProvider } from "@/lib/ai/types";
@@ -18,6 +19,7 @@ export interface StrictJsonCompletionParams {
   maxTokens?: number;
   images?: AiImageInput[];
   onProgress?: AiProgressCallback;
+  signal?: AbortSignal;
 }
 
 function trimTrailingSlash(value: string): string {
@@ -51,8 +53,7 @@ async function callOpenAiCompatible(
   apiKey: string,
   baseUrl: string
 ): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const { signal, dispose } = createTimeoutSignal(45_000, params.signal);
 
   try {
     const headers: Record<string, string> = {
@@ -93,7 +94,7 @@ async function callOpenAiCompatible(
           },
         ],
       }),
-      signal: controller.signal,
+      signal,
     });
 
     if (!res.ok) {
@@ -113,7 +114,7 @@ async function callOpenAiCompatible(
 
     return content;
   } finally {
-    clearTimeout(timeout);
+    dispose();
   }
 }
 
@@ -122,8 +123,7 @@ async function callAnthropic(
   apiKey: string,
   baseUrl: string
 ): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const { signal, dispose } = createTimeoutSignal(45_000, params.signal);
 
   try {
     const res = await fetch(`${trimTrailingSlash(baseUrl)}/messages`, {
@@ -157,7 +157,7 @@ async function callAnthropic(
           },
         ],
       }),
-      signal: controller.signal,
+      signal,
     });
 
     if (!res.ok) {
@@ -177,7 +177,7 @@ async function callAnthropic(
 
     return firstText;
   } finally {
-    clearTimeout(timeout);
+    dispose();
   }
 }
 
@@ -191,6 +191,8 @@ async function callCliProvider(
       systemPrompt: params.systemPrompt,
       userPrompt: params.userPrompt,
       images: params.images,
+      onProgress: params.onProgress,
+      signal: params.signal,
     });
   }
 
@@ -201,6 +203,7 @@ async function callCliProvider(
     userPrompt: params.userPrompt,
     images: params.images,
     onProgress: params.onProgress,
+    signal: params.signal,
   });
 }
 

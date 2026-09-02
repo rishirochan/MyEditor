@@ -60,6 +60,17 @@ const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.25;
 const ZOOM_WHEEL_SENSITIVITY = 0.002;
 
+function pdfNameFromUrl(pdfUrl: string | null): { name: string; path: string } | null {
+  if (!pdfUrl) return null;
+  const queryIndex = pdfUrl.indexOf("?");
+  const query = queryIndex === -1 ? "" : pdfUrl.slice(queryIndex + 1);
+  const mainFile = new URLSearchParams(query).get("mainFile");
+  if (!mainFile) return null;
+  const path = mainFile.replace(/\.tex$/i, ".pdf");
+  const name = path.split("/").pop() ?? path;
+  return { name, path };
+}
+
 // ─── PdfViewer ──────────────────────────────────────
 
 export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function PdfViewer({ pdfUrl, loading, onTextSelect, toolbarExtra }, ref) {
@@ -305,6 +316,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   }
 
   const pageWidth = containerWidth > 0 ? (containerWidth - 48) * zoom : undefined;
+  const pdfName = pdfNameFromUrl(pdfUrl);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -320,6 +332,21 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
         {/* Floating control bar. Chrome hovers over the paper, it does not frame it. */}
         <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
           <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-border bg-bg-elevated px-1.5 py-1 shadow-lg">
+            {pdfName && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="min-w-0 max-w-[9rem] shrink truncate px-1.5 text-xs text-text-secondary">
+                      {pdfName.name}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="break-all">
+                    {pdfName.path}
+                  </TooltipContent>
+                </Tooltip>
+                <div className="mx-1 h-4 w-px shrink-0 bg-border" />
+              </>
+            )}
             {numPages > 0 && (
               <>
                 <Tooltip>

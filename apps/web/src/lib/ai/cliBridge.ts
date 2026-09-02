@@ -1,3 +1,4 @@
+import { createTimeoutSignal, isAbortError } from "@/lib/ai/abort";
 import type { CliStatusSnapshot } from "@/lib/ai/cliDetect";
 import type { AiImageInput } from "@/lib/ai/imageInput";
 
@@ -18,7 +19,8 @@ export function isCliBridgeConfigured(): boolean {
 async function requestBridge(
   path: string,
   timeoutMs: number,
-  init?: RequestInit
+  init?: RequestInit,
+  external?: AbortSignal
 ): Promise<unknown> {
   const baseUrl = bridgeUrl();
   if (!baseUrl) throw new Error("CLI_BRIDGE_URL is not configured");
@@ -26,8 +28,7 @@ async function requestBridge(
   const token = process.env.CLI_BRIDGE_TOKEN?.trim();
   if (!token) throw new Error("CLI_BRIDGE_TOKEN is not configured");
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const { signal, dispose } = createTimeoutSignal(timeoutMs, external);
 
   let response: Response;
   try {
@@ -37,11 +38,12 @@ async function requestBridge(
         Authorization: `Bearer ${token}`,
         ...init?.headers,
       },
-      signal: controller.signal,
+      signal,
     });
-  } catch {
-    clearTimeout(timeout);
-    if (controller.signal.aborted) {
+  } catch (error) {
+    dispose();
+    if (external?.aborted) throw error;
+    if (isAbortError(error) || signal.aborted) {
       throw new Error(`CLI bridge timed out after ${timeoutMs}ms`);
     }
     throw new Error(
@@ -62,7 +64,7 @@ async function requestBridge(
       throw new Error("CLI bridge returned invalid JSON");
     }
   } finally {
-    clearTimeout(timeout);
+    dispose();
   }
 }
 
@@ -87,12 +89,25 @@ export async function completeWithCliBridge(params: {
   systemPrompt: string;
   userPrompt: string;
   images?: AiImageInput[];
+  signal?: AbortSignal;
 }): Promise<string> {
-  const result = await requestBridge("/v1/complete", COMPLETION_TIMEOUT_MS, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const result = await requestBridge(
+    "/v1/complete",
+    COMPLETION_TIMEOUT_MS,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: params.provider,
+        model: params.model,
+        effort: params.effort,
+        systemPrompt: params.systemPrompt,
+        userPrompt: params.userPrompt,
+        images: params.images,
+      }),
+    },
+    params.signal
+  );
   const text =
     result &&
     typeof result === "object" &&

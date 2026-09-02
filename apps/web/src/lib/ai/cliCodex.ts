@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { createTimeoutSignal } from "@/lib/ai/abort";
 import {
   completeWithCliBridge,
   isCliBridgeConfigured,
@@ -26,7 +27,8 @@ export type CodexProgressEvent =
         | "response.failed"
         | "response.incomplete";
     }
-  | { type: "reasoning_summary"; text: string };
+  | { type: "reasoning_summary"; text: string }
+  | { type: "tool_call"; name: string };
 
 type CodexProgressCallback = (event: CodexProgressEvent) => void;
 
@@ -108,6 +110,45 @@ export function parseCodexSseEvent(record: string): Record<string, unknown> | nu
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function itemName(record: Record<string, unknown> | null): string {
+  if (!record) return "";
+  if (typeof record.name === "string" && record.name.trim()) {
+    return record.name.trim();
+  }
+  const fn = asRecord(record.function);
+  if (typeof fn?.name === "string" && fn.name.trim()) return fn.name.trim();
+  if (typeof record.tool === "string" && record.tool.trim()) {
+    return record.tool.trim();
+  }
+  return "";
+}
+
+function displayToolName(itemType: string, name: string): string {
+  if (name) return name;
+  return itemType.replace(/_call$/, "").replace(/_/g, " ") || "tool";
+}
+
+function isToolItemType(itemType: string): boolean {
+  return (
+    itemType === "function_call" ||
+    itemType === "custom_tool_call" ||
+    itemType === "mcp_call" ||
+    itemType === "tool_call" ||
+    itemType === "web_search_call" ||
+    itemType === "file_search_call" ||
+    itemType === "computer_call" ||
+    itemType === "code_interpreter_call" ||
+    itemType === "image_generation_call" ||
+    itemType.endsWith("_call")
+  );
+}
+
 function emitCodexProgress(
   event: Record<string, unknown>,
   onProgress: CodexProgressCallback | undefined,
@@ -135,6 +176,46 @@ function emitCodexProgress(
       if (!summaryDeltaKeys.has(key)) {
         onProgress({ type: "reasoning_summary", text: event.text });
       }
+      return;
+    }
+    case "response.output_item.added":
+    case "response.output_item.in_progress": {
+      const item = asRecord(event.item);
+      const itemType = typeof item?.type === "string" ? item.type : "";
+      if (itemType === "reasoning") {
+        onProgress({ type: "reasoning_summary", text: "" });
+        return;
+      }
+      if (isToolItemType(itemType)) {
+        onProgress({
+          type: "tool_call",
+          name: displayToolName(itemType, itemName(item)),
+        });
+      }
+      return;
+    }
+    case "response.function_call_arguments.delta":
+    case "response.custom_tool_call_input.delta": {
+      const item = asRecord(event.item);
+      onProgress({
+        type: "tool_call",
+        name: itemName(event) || itemName(item) || "tool",
+      });
+      return;
+    }
+  }
+
+  if (
+    event.type.startsWith("response.") &&
+    event.type.endsWith(".in_progress") &&
+    event.type !== "response.in_progress"
+  ) {
+    const itemType = event.type.slice("response.".length, -".in_progress".length);
+    if (isToolItemType(itemType) || itemType.endsWith("_call")) {
+      onProgress({
+        type: "tool_call",
+        name: displayToolName(itemType, itemName(event) || itemName(asRecord(event.item))),
+      });
     }
   }
 }
@@ -230,6 +311,7 @@ export async function completeWithCodexCli(params: {
   userPrompt: string;
   images?: AiImageInput[];
   onProgress?: CodexProgressCallback;
+  signal?: AbortSignal;
 }): Promise<string> {
   if (isCliBridgeConfigured()) {
     params.onProgress?.({
@@ -244,6 +326,7 @@ export async function completeWithCodexCli(params: {
         systemPrompt: params.systemPrompt,
         userPrompt: params.userPrompt,
         images: params.images,
+        signal: params.signal,
       });
       params.onProgress?.({
         type: "status",
@@ -257,8 +340,7 @@ export async function completeWithCodexCli(params: {
   }
 
   const { accessToken, accountId } = await loadCodexTokens();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CODEX_TIMEOUT_MS);
+  const { signal, dispose } = createTimeoutSignal(CODEX_TIMEOUT_MS, params.signal);
 
   try {
     const effort = params.effort?.trim();
@@ -300,7 +382,7 @@ export async function completeWithCodexCli(params: {
         "session_id": randomUUID(),
       },
       body: JSON.stringify(requestBody),
-      signal: controller.signal,
+      signal,
     });
 
     const responseBody = await readResponseBody(res.body, params.onProgress);
@@ -319,6 +401,6 @@ export async function completeWithCodexCli(params: {
     }
     return text;
   } finally {
-    clearTimeout(timeout);
+    dispose();
   }
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import path from "path";
 import { withAuth } from "@/lib/auth/middleware";
+import { isAbortError } from "@/lib/ai/abort";
 import { completeStrictJson } from "@/lib/ai/client";
 import {
   AI_IMAGE_MEDIA_TYPES,
@@ -49,6 +50,7 @@ const imageSchema = z
 const requestSchema = z
   .object({
     projectId: z.string().uuid(),
+    mode: z.enum(["contour", "carve"]).default("carve"),
     files: z.array(contextFileSchema).min(1).max(2),
     messages: z
       .array(
@@ -99,7 +101,23 @@ const aiResponseSchema = z.object({
   edits: z.array(aiTextEditSchema).max(40),
 });
 
-const systemPrompt = [
+/* Contour is enforced below by discarding edits, not by trusting the model to
+   obey this prompt. The schema stays identical so parsing is mode-agnostic. */
+const contourSystemPrompt = [
+  "You are a senior LaTeX writing assistant embedded in a LaTeX editor.",
+  "You are in discussion mode: you can read the document but you cannot change it.",
+  "Return ONLY valid JSON matching this exact schema:",
+  "{ reply: string, edits: [] }",
+  "Rules:",
+  "1) edits must always be an empty array. The editor discards any edit you return.",
+  "2) Answer the user's question about contextFiles[].content directly and concretely.",
+  "3) Write the reply in plain language. Do not quote LaTeX source, commands, environments, or markup unless the user explicitly asks to see the source.",
+  "4) When the user wants a change, explain what to change and why in prose. Never claim to have made it.",
+  "5) contextFiles[].content is the sole source of truth for the document's current state.",
+  "6) Do not include markdown or extra keys.",
+].join("\n");
+
+const carveSystemPrompt = [
   "You are a senior LaTeX writing assistant embedded in a LaTeX editor.",
   "Return ONLY valid JSON matching this exact schema:",
   "{ reply: string, edits: [{ filePath: string, oldText: string, newText: string }] }",
@@ -132,7 +150,13 @@ interface SkippedEdit {
 }
 
 type StreamEvent =
-  | { type: "activity"; message: string; append?: boolean }
+  | {
+      type: "activity";
+      message: string;
+      append?: boolean;
+      label?: string;
+      tool?: string;
+    }
   | {
       type: "result";
       reply: string;
@@ -143,24 +167,35 @@ type StreamEvent =
 
 function streamResponse(
   requestId: string,
+  signal: AbortSignal,
   run: (emit: (event: StreamEvent) => void) => Promise<void>
 ): NextResponse {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (event: StreamEvent) => {
-        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        if (signal.aborted) return;
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          // Stream already closed after the client disconnected.
+        }
       };
 
       try {
         await run(emit);
       } catch (error) {
+        if (signal.aborted || isAbortError(error)) return;
         const message =
           error instanceof Error ? error.message : "AI request failed";
         console.error(`[ai/chat:${requestId}] ${message}`);
         emit({ type: "error", message });
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          // Already closed.
+        }
       }
     },
   });
@@ -181,13 +216,15 @@ async function applyRequestedEdits(params: {
   files: Array<{ id: string; path: string; content: string }>;
   edits: Array<AiTextEdit & { startIndex?: number }>;
   emit: (event: StreamEvent) => void;
+  signal?: AbortSignal;
 }): Promise<{ applied: AppliedEdit[]; skipped: SkippedEdit[] }> {
-  const { request, projectId, files, edits, emit } = params;
+  const { request, projectId, files, edits, emit, signal } = params;
   const buffers = new Map(files.map((file) => [file.path, { ...file }]));
   const applied: AppliedEdit[] = [];
   const skipped: SkippedEdit[] = [];
 
   for (const edit of edits) {
+    if (signal?.aborted) break;
     const filePath = normalizeFilePath(edit.filePath);
     const file = buffers.get(filePath);
     if (!file) {
@@ -228,16 +265,23 @@ async function applyRequestedEdits(params: {
 
   emit({
     type: "activity",
+    label: "Applying edits",
+    tool: "apply_edits",
     message: `Applying ${applied.length} validated edit${applied.length === 1 ? "" : "s"}`,
   });
 
   const kept: AppliedEdit[] = [];
   for (const file of buffers.values()) {
+    if (signal?.aborted) break;
     const fileEdits = applied.filter((edit) => edit.filePath === file.path);
     if (fileEdits.length === 0) continue;
     try {
       await updateFileViaExistingApi(request, projectId, file.id, file.content);
-      emit({ type: "activity", message: `Verified ${file.path}` });
+      emit({
+        type: "activity",
+        label: `Verifying ${path.basename(file.path)}`,
+        message: `Verified ${file.path}`,
+      });
       kept.push(...fileEdits);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "File update failed";
@@ -340,29 +384,36 @@ export async function POST(request: NextRequest) {
     const requestId = randomUUID();
 
     console.info(
-      `[ai/chat:${requestId}] files=${contextFiles.map((file) => file.path).join(",")} action=${parsed.data.undoEdits ? "undo" : "chat"}`
+      `[ai/chat:${requestId}] files=${contextFiles.map((file) => file.path).join(",")} action=${parsed.data.undoEdits ? "undo" : "chat"} mode=${parsed.data.mode}`
     );
 
-    return streamResponse(requestId, async (emit) => {
+    return streamResponse(requestId, req.signal, async (emit) => {
       emit({
         type: "activity",
+        label: "Reading files",
         message: `Reading ${contextFiles.map((file) => file.path).join(", ")}`,
       });
       if (parsed.data.images?.length) {
         emit({
           type: "activity",
+          label: "Reading screenshots",
           message: `Reading ${parsed.data.images.length} screenshot${parsed.data.images.length === 1 ? "" : "s"}`,
         });
       }
 
       if (parsed.data.undoEdits) {
-        emit({ type: "activity", message: "Validating inverse edit" });
+        emit({
+          type: "activity",
+          label: "Validating edits",
+          message: "Validating inverse edit",
+        });
         const { applied, skipped } = await applyRequestedEdits({
           request,
           projectId,
           files: contextFiles,
           edits: parsed.data.undoEdits,
           emit,
+          signal: req.signal,
         });
         console.info(
           `[ai/chat:${requestId}] applied=${applied.length} skipped=${skipped.length}`
@@ -379,9 +430,11 @@ export async function POST(request: NextRequest) {
         return;
       }
 
+      const contourMode = parsed.data.mode === "contour";
       const aiSettings = await getUserAiSettings(user.id);
       emit({
         type: "activity",
+        label: "Analyzing",
         message: `Analyzing with ${aiSettings.latexWriter.model}`,
       });
       const visibleFiles = contextFiles.map((file) => {
@@ -393,9 +446,11 @@ export async function POST(request: NextRequest) {
         };
       });
       let reasoningSummaryChars = 0;
+      let progressPhase: "idle" | "thinking" | "tool" = "idle";
+      let lastToolName = "";
       const aiPayload = await completeStrictJson({
         modelSettings: aiSettings.latexWriter,
-        systemPrompt,
+        systemPrompt: contourMode ? contourSystemPrompt : carveSystemPrompt,
         userPrompt: JSON.stringify(
           {
             contextFiles: visibleFiles,
@@ -410,10 +465,30 @@ export async function POST(request: NextRequest) {
         ),
         temperature: 0.2,
         images: parsed.data.images,
+        signal: req.signal,
         onProgress: (event) => {
+          if (event.type === "status") return;
+          if (event.type === "tool_call") {
+            if (progressPhase === "tool" && lastToolName === event.name) return;
+            progressPhase = "tool";
+            lastToolName = event.name;
+            emit({
+              type: "activity",
+              tool: event.name,
+              label: `Calling ${event.name}`,
+              message: `Calling ${event.name}`,
+            });
+            return;
+          }
           if (event.type === "reasoning_summary") {
-            if (reasoningSummaryChars === 0) {
-              emit({ type: "activity", message: "Reasoning summary: " });
+            if (progressPhase !== "thinking") {
+              progressPhase = "thinking";
+              lastToolName = "";
+              emit({
+                type: "activity",
+                label: "Thinking",
+                message: "Thinking: ",
+              });
             }
             const chunk = event.text.slice(
               0,
@@ -427,18 +502,38 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      if (req.signal.aborted) return;
+
       const aiResult = aiResponseSchema.safeParse(aiPayload);
       if (!aiResult.success) {
         throw new Error("AI response schema validation failed");
       }
 
-      emit({ type: "activity", message: "Validating proposed edits" });
+      if (contourMode) {
+        console.info(
+          `[ai/chat:${requestId}] provider=${aiSettings.latexWriter.provider} model=${aiSettings.latexWriter.model} mode=contour discarded=${aiResult.data.edits.length}`
+        );
+        emit({
+          type: "result",
+          reply: aiResult.data.reply,
+          appliedEdits: [],
+          skippedEdits: [],
+        });
+        return;
+      }
+
+      emit({
+        type: "activity",
+        label: "Validating edits",
+        message: "Validating proposed edits",
+      });
       const { applied, skipped } = await applyRequestedEdits({
         request,
         projectId,
         files: contextFiles,
         edits: aiResult.data.edits,
         emit,
+        signal: req.signal,
       });
       console.info(
         `[ai/chat:${requestId}] provider=${aiSettings.latexWriter.provider} model=${aiSettings.latexWriter.model} applied=${applied.length} skipped=${skipped.length}`

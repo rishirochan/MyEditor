@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils/cn";
+import { isAbortError } from "@/lib/ai/abort";
+import {
+  effortLabel,
+  normalizeEffort,
+  type CliModelOption,
+} from "@/lib/ai/cliModelCatalog";
 import {
   AI_IMAGE_MEDIA_TYPES,
   MAX_AI_IMAGE_BYTES,
@@ -15,16 +23,51 @@ import {
 } from "@/lib/ai/imageInput";
 import { parseStoredContextIds } from "./aiContextStorage";
 import {
+  ChevronsUpDown,
   ImagePlus,
   Loader2,
+  MessageSquare,
+  PencilLine,
   Send,
   Sparkles,
+  Square,
   Trash2,
   Undo2,
   X,
 } from "lucide-react";
 
 const MAX_CONTEXT_FILES = 2;
+
+type AiMode = "contour" | "carve";
+
+const DEFAULT_AI_MODE: AiMode = "carve";
+
+const AI_MODES = [
+  {
+    id: "contour",
+    label: "Contour",
+    Icon: MessageSquare,
+    hint: "Contour: discuss only, never edits your files",
+  },
+  {
+    id: "carve",
+    label: "Carve",
+    Icon: PencilLine,
+    hint: "Carve: may edit the selected files when the request calls for it",
+  },
+] as const;
+
+function isAiMode(value: unknown): value is AiMode {
+  return value === "contour" || value === "carve";
+}
+
+interface ChatModelState {
+  provider: string;
+  model: string;
+  effort: string | null;
+  services: Array<{ id: string; label: string }>;
+  options: CliModelOption[];
+}
 
 interface AiEdit {
   filePath: string;
@@ -54,6 +97,8 @@ interface AiMessage {
   undone?: boolean;
   undoError?: string;
   screenshotCount?: number;
+  cancelled?: boolean;
+  mode?: AiMode;
 }
 
 interface PendingScreenshot {
@@ -81,8 +126,20 @@ interface ChatResponse {
   result?: ChatResult;
 }
 
+interface ActivityItem {
+  message: string;
+  label?: string;
+  tool?: string;
+}
+
 type ChatEvent =
-  | { type: "activity"; message: string; append?: boolean }
+  | {
+      type: "activity";
+      message: string;
+      append?: boolean;
+      label?: string;
+      tool?: string;
+    }
   | { type: "result" } & ChatResult
   | { type: "error"; message: string };
 
@@ -105,15 +162,21 @@ interface AiChatPanelProps {
   onEditsApplied: (touchedPaths: string[]) => void;
 }
 
-/* Fenced blocks, backtick spans and bare LaTeX control sequences read as code.
-   ponytail: no markdown parser, and `$…$` math is left alone so prices don't
-   get monospaced. Add a parser only if messages start carrying real markdown. */
+/* Plain chat text highlights fenced blocks, backticks and LaTeX commands.
+   Assistant replies use the Markdown renderer below. */
 const CODE_PARTS = /(```[\s\S]*?```|`[^`\n]+`|\\[a-zA-Z@]+\*?)/g;
+const PLAIN_CODE_PARTS = /(```[\s\S]*?```|`[^`\n]+`)/g;
 
-export function MessageText({ text }: { text: string }) {
+export function MessageText({
+  text,
+  highlightLatex = true,
+}: {
+  text: string;
+  highlightLatex?: boolean;
+}) {
   return (
     <>
-      {text.split(CODE_PARTS).map((part, index) => {
+      {text.split(highlightLatex ? CODE_PARTS : PLAIN_CODE_PARTS).map((part, index) => {
         if (part.startsWith("```")) {
           return (
             <code
@@ -147,6 +210,38 @@ export function MessageText({ text }: { text: string }) {
         return <span key={index}>{part}</span>;
       })}
     </>
+  );
+}
+
+function MarkdownMessage({ text }: { text: string }) {
+  return (
+    <div className="min-w-0 whitespace-normal break-words [&_a]:text-accent [&_a]:underline [&_a]:underline-offset-2 [&_blockquote]:my-2 [&_blockquote]:rounded-md [&_blockquote]:bg-bg-inset [&_blockquote]:px-3 [&_blockquote]:py-2 [&_code]:rounded [&_code]:bg-bg-inset [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[11px] [&_h1]:mb-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:my-2 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:font-semibold [&_hr]:my-3 [&_hr]:border-border-subtle [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-bg-inset [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_strong]:text-text-primary [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        components={{
+          table: ({ children }) => (
+            <div className="my-2 overflow-x-auto rounded-md border border-border">
+              <table className="w-full min-w-[32rem] border-collapse text-left [&_tbody_tr:last-child_td]:border-b-0">
+                {children}
+              </table>
+            </div>
+          ),
+          th: ({ children }) => (
+            <th className="border-b border-border bg-bg-inset px-2.5 py-2 align-top font-semibold text-text-primary">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="border-b border-border-subtle px-2.5 py-2 align-top">
+              {children}
+            </td>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
   );
 }
 
@@ -190,9 +285,9 @@ async function readNdjson(
 
 async function readChatResponse(
   response: Response,
-  onActivity: (activity: string[]) => void
+  onActivity: (activity: ActivityItem[]) => void
 ): Promise<ChatResponse> {
-  const activity: string[] = [];
+  const activity: ActivityItem[] = [];
   let result: ChatResult | undefined;
   let errorMessage: string | undefined;
 
@@ -200,9 +295,17 @@ async function readChatResponse(
     await readNdjson(response, (streamEvent) => {
       if (streamEvent.type === "activity") {
         if (streamEvent.append && activity.length > 0) {
-          activity[activity.length - 1] += streamEvent.message;
+          const last = activity[activity.length - 1];
+          activity[activity.length - 1] = {
+            ...last,
+            message: last.message + streamEvent.message,
+          };
         } else {
-          activity.push(streamEvent.message);
+          activity.push({
+            message: streamEvent.message,
+            label: streamEvent.label,
+            tool: streamEvent.tool,
+          });
         }
         onActivity([...activity]);
       } else if (streamEvent.type === "result") {
@@ -217,7 +320,23 @@ async function readChatResponse(
     else errorMessage = typeof data.error === "string" ? data.error : undefined;
   }
 
-  return { activity, errorMessage, result };
+  return {
+    activity: activity.map((item) => item.message),
+    errorMessage,
+    result,
+  };
+}
+
+function liveStatusLabel(items: ActivityItem[]): string {
+  const last = items[items.length - 1];
+  if (!last) return "Starting...";
+  if (last.tool) return `Calling ${last.tool}`;
+  if (last.label) return last.label;
+  return last.message || "Starting...";
+}
+
+function isFileDrag(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer.types).includes("Files");
 }
 
 function historyContent(message: AiMessage) {
@@ -327,6 +446,132 @@ function EditDiff({ edit }: { edit: AiEdit }) {
   );
 }
 
+const ROLLER_ROW_HEIGHT = 24;
+const ROLLER_WHEEL_STEP = 28;
+
+/**
+ * A one-row drum: the selection sits in the window and the rest of the list
+ * lives above and below it. Wheel nudges one step at a time; the invisible
+ * native select on top keeps click, touch, and keyboard behaviour intact.
+ */
+function OptionRoller({
+  label,
+  options,
+  value,
+  disabled,
+  onSelect,
+}: {
+  label: string;
+  options: Array<{ id: string; label: string; title?: string }>;
+  value: string | null;
+  disabled: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const stepRef = useRef<(direction: number) => void>(() => {});
+
+  const index = Math.max(
+    0,
+    options.findIndex((option) => option.id === value)
+  );
+
+  useEffect(() => {
+    stepRef.current = (direction: number) => {
+      const next = index + direction;
+      if (next < 0 || next >= options.length) return;
+      const target = options[next];
+      if (target && target.id !== value) onSelect(target.id);
+    };
+  });
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || disabled) return;
+
+    let travelled = 0;
+    let resetTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function handleWheel(event: WheelEvent) {
+      // A vertical gesture here belongs to the drum, not the panel behind it.
+      if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+      event.preventDefault();
+
+      travelled += event.deltaY;
+      while (Math.abs(travelled) >= ROLLER_WHEEL_STEP) {
+        const direction = travelled > 0 ? 1 : -1;
+        travelled -= direction * ROLLER_WHEEL_STEP;
+        stepRef.current(direction);
+      }
+
+      // Trackpad momentum leaves a remainder that would leak into the next flick.
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        travelled = 0;
+      }, 140);
+    }
+
+    frame.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      clearTimeout(resetTimer);
+      frame.removeEventListener("wheel", handleWheel);
+    };
+  }, [disabled]);
+
+  if (options.length === 0) return null;
+
+  const active = options[index];
+
+  return (
+    <div
+      ref={frameRef}
+      title={active?.title ?? active?.label}
+      className={cn(
+        "group relative shrink-0 rounded-lg border border-border bg-bg-inset p-0.5",
+        "transition-colors duration-150 ease-out",
+        "focus-within:border-accent hover:border-border-strong",
+        disabled && "opacity-45"
+      )}
+    >
+      <div
+        className="overflow-hidden"
+        style={{ height: ROLLER_ROW_HEIGHT }}
+        aria-hidden="true"
+      >
+        <div
+          className="motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out"
+          style={{ transform: `translateY(${-index * ROLLER_ROW_HEIGHT}px)` }}
+        >
+          {options.map((option) => (
+            <div
+              key={option.id}
+              className="flex items-center pr-4 pl-1.5 text-[11px] font-medium whitespace-nowrap text-text-secondary"
+              style={{ height: ROLLER_ROW_HEIGHT }}
+            >
+              {option.label}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <ChevronsUpDown className="pointer-events-none absolute top-1/2 right-1 h-2.5 w-2.5 -translate-y-1/2 text-text-muted transition-colors duration-150 ease-out group-hover:text-text-secondary" />
+
+      <select
+        aria-label={label}
+        value={active?.id ?? ""}
+        disabled={disabled}
+        onChange={(event) => onSelect(event.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+      >
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function sanitizeMessages(messages: AiMessage[]): AiMessage[] {
   return messages.map((message) => ({ ...message, undoing: false }));
 }
@@ -368,7 +613,10 @@ export function AiChatPanel({
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [activity, setActivity] = useState<string[]>([]);
+  const [mode, setMode] = useState<AiMode>(DEFAULT_AI_MODE);
+  const [chatModel, setChatModel] = useState<ChatModelState | null>(null);
+  const [chatModelBusy, setChatModelBusy] = useState(false);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [manualContext, setManualContext] = useState(false);
   const [screenshots, setScreenshots] = useState<PendingScreenshot[]>([]);
@@ -382,8 +630,12 @@ export function AiChatPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const screenshotInputRef = useRef<HTMLInputElement>(null);
   const loadedKeyRef = useRef<string | null>(null);
+  const loadedModeKeyRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const dragDepthRef = useRef(0);
   const storageKey = `ai-chat-v2:${projectId}`;
   const contextStorageKey = `ai-context:${projectId}`;
+  const modeStorageKey = `ai-mode:${projectId}`;
   const contextLoaded = loadedContextProjectId === projectId;
 
   useEffect(() => {
@@ -405,9 +657,50 @@ export function AiChatPanel({
   }, [messages, projectId, storageKey]);
 
   useEffect(() => {
+    if (loadedModeKeyRef.current !== modeStorageKey) {
+      loadedModeKeyRef.current = modeStorageKey;
+      let stored: string | null = null;
+      try {
+        stored = window.localStorage.getItem(modeStorageKey);
+      } catch {
+        // Browser storage is optional.
+      }
+      setMode(isAiMode(stored) ? stored : DEFAULT_AI_MODE);
+      return;
+    }
+    try {
+      window.localStorage.setItem(modeStorageKey, mode);
+    } catch {
+      // Browser storage is optional.
+    }
+  }, [mode, modeStorageKey]);
+
+  useEffect(() => {
+    if (configured === false) return;
+    let cancelled = false;
+    fetch("/api/ai/chat-model", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: ChatModelState | null) => {
+        if (!cancelled && data) setChatModel(data);
+      })
+      .catch(() => {
+        // The picker stays hidden when settings cannot be read.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [configured]);
+
+  useEffect(() => {
     setScreenshots([]);
     setAttachmentError(null);
   }, [projectId]);
+
+  useEffect(() => {
+    if (!sending) return;
+    dragDepthRef.current = 0;
+    setIsDraggingScreenshot(false);
+  }, [sending]);
 
   useEffect(() => {
     if (contextLoaded) return;
@@ -592,6 +885,7 @@ export function AiChatPanel({
         appliedEdits: result.appliedEdits,
         skippedEdits: result.skippedEdits,
         canUndo,
+        mode,
       },
     ]);
 
@@ -624,10 +918,13 @@ export function AiChatPanel({
     );
     setSending(true);
     setActivity([]);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           projectId,
           files: filesPayload(undoFiles),
@@ -683,7 +980,17 @@ export function AiChatPanel({
             : entry
         )
       );
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) {
+        setMessages((previous) =>
+          previous.map((entry) =>
+            entry.id === message.id
+              ? { ...entry, undoing: false, undoError: undefined }
+              : entry
+          )
+        );
+        return;
+      }
       setMessages((previous) =>
         previous.map((entry) =>
           entry.id === message.id
@@ -696,6 +1003,7 @@ export function AiChatPanel({
         )
       );
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setActivity([]);
       setSending(false);
     }
@@ -717,9 +1025,10 @@ export function AiChatPanel({
         ? `Re: lines ${selection.fromLine}–${selection.toLine}`
         : undefined,
       screenshotCount: screenshots.length || undefined,
+      mode,
     };
     const history = [...messages, userMessage]
-      .filter((message) => !message.error)
+      .filter((message) => !message.error && !message.cancelled)
       .slice(-30)
       .map((message) => ({
         role: message.role,
@@ -733,13 +1042,17 @@ export function AiChatPanel({
     if (selection) onClearSelection();
     setSending(true);
     setActivity([]);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           projectId,
+          mode,
           files: filesPayload(selectedFiles),
           messages: history,
           ...(screenshots.length
@@ -761,13 +1074,27 @@ export function AiChatPanel({
               "AI request failed. Please try again.",
             error: true,
             activity: chatResponse.activity,
+            mode,
           },
         ]);
         return;
       }
 
       applyResult(chatResponse.result, chatResponse.activity);
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) {
+        setMessages((previous) => [
+          ...previous,
+          {
+            id: nextMessageId(),
+            role: "assistant",
+            content: "Stopped.",
+            cancelled: true,
+            mode,
+          },
+        ]);
+        return;
+      }
       setMessages((previous) => [
         ...previous,
         {
@@ -775,16 +1102,102 @@ export function AiChatPanel({
           role: "assistant",
           content: "Network error. Please try again.",
           error: true,
-          activity,
+          mode,
         },
       ]);
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setActivity([]);
       setSending(false);
     }
   }
 
+  function handleStop() {
+    abortRef.current?.abort();
+  }
+
+  async function updateChatModel(next: {
+    provider?: string;
+    model?: string;
+    effort?: string | null;
+  }) {
+    if (!chatModel || chatModelBusy) return;
+    const previous = chatModel;
+    setChatModel({ ...chatModel, ...next });
+    setChatModelBusy(true);
+    try {
+      const response = await fetch("/api/ai/chat-model", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!response.ok) throw new Error("Model update failed");
+      setChatModel((await response.json()) as ChatModelState);
+    } catch {
+      setChatModel(previous);
+    } finally {
+      setChatModelBusy(false);
+    }
+  }
+
+  function selectChatService(provider: string) {
+    if (!chatModel || provider === chatModel.provider) return;
+    void updateChatModel({ provider });
+  }
+
+  function selectChatModel(model: string) {
+    if (!chatModel || model === chatModel.model) return;
+    void updateChatModel({
+      model,
+      effort: normalizeEffort(chatModel.effort, chatModel.options, model),
+    });
+  }
+
+  function selectChatEffort(effort: string) {
+    if (!chatModel || effort === chatModel.effort) return;
+    void updateChatModel({ model: chatModel.model, effort });
+  }
+
+  function resetScreenshotDrag() {
+    dragDepthRef.current = 0;
+    setIsDraggingScreenshot(false);
+  }
+
+  function handleScreenshotDragEnter(event: DragEvent<HTMLFormElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current += 1;
+    if (!sending && hasContext && isFileDrag(event)) {
+      setIsDraggingScreenshot(true);
+    }
+  }
+
+  function handleScreenshotDragOver(event: DragEvent<HTMLFormElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleScreenshotDragLeave(event: DragEvent<HTMLFormElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDraggingScreenshot(false);
+  }
+
+  function handleScreenshotDrop(event: DragEvent<HTMLFormElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    resetScreenshotDrag();
+    if (!sending && hasContext) {
+      void addScreenshots(event.dataTransfer.files);
+    }
+  }
+
   const folderLabel = folderPath ? `${folderPath}/` : "project root";
+  const modelOptions = chatModel?.options ?? [];
+  const effortOptions =
+    modelOptions.find((option) => option.id === chatModel?.model)?.efforts ?? [];
 
   if (configured === false) {
     return (
@@ -890,14 +1303,23 @@ export function AiChatPanel({
             >
               <div
                 className={cn(
-                  "whitespace-pre-wrap rounded-lg px-2.5 py-1.5 text-xs leading-relaxed",
+                  "rounded-lg px-2.5 py-1.5 text-xs leading-relaxed",
+                  message.role === "user" && "whitespace-pre-wrap",
                   message.role === "user"
                     ? "max-w-[85%] bg-accent-subtle text-text-primary"
                     : message.error
                       ? "max-w-[95%] border border-error bg-error-subtle text-error"
-                      : "max-w-[95%] bg-bg-elevated text-text-secondary"
+                      : message.cancelled
+                        ? "max-w-[95%] bg-bg-elevated text-text-muted"
+                        : "max-w-[95%] bg-bg-elevated text-text-secondary"
                 )}
               >
+                {message.role === "user" && message.mode === "contour" && (
+                  <p className="mb-1 inline-flex items-center gap-1 text-[10px] font-medium text-text-muted">
+                    <MessageSquare className="h-2.5 w-2.5" />
+                    Contour
+                  </p>
+                )}
                 {message.contextLabel && (
                   <p className="mb-1 font-mono text-[10px] text-text-muted">
                     {message.contextLabel}
@@ -914,7 +1336,14 @@ export function AiChatPanel({
                     {message.screenshotCount === 1 ? "" : "s"} attached
                   </p>
                 ) : null}
-                <MessageText text={message.content} />
+                {message.role === "assistant" ? (
+                  <MarkdownMessage text={message.content} />
+                ) : (
+                  <MessageText
+                    text={message.content}
+                    highlightLatex={message.mode !== "contour"}
+                  />
+                )}
                 {message.appliedEdits?.length ? (
                   <div className="relative mt-1.5 space-y-1.5 border-t border-border-subtle pt-1.5 text-[10px]">
                     {message.appliedEdits.map((edit, index) => (
@@ -991,23 +1420,10 @@ export function AiChatPanel({
             <div className="animate-fade-in rounded-lg bg-bg-elevated px-2.5 py-1.5">
               <div className="flex items-center gap-1.5 font-medium text-text-secondary">
                 <Loader2 className="h-3 w-3 animate-spin text-accent" />
-                Working
+                <span className="animate-pulse-soft">
+                  {liveStatusLabel(activity)}
+                </span>
               </div>
-              <ul className="mt-1 space-y-0.5 pl-3 font-mono">
-                {(activity.length ? activity : ["Starting request..."]).map(
-                  (item, index, all) => (
-                    <li
-                      key={`${item}-${index}`}
-                      className={cn(
-                        index === all.length - 1 &&
-                          "animate-pulse-soft text-text-secondary"
-                      )}
-                    >
-                      {item}
-                    </li>
-                  )
-                )}
-              </ul>
             </div>
           </div>
         )}
@@ -1043,25 +1459,26 @@ export function AiChatPanel({
 
       <form
         onSubmit={handleSubmit}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          if (!sending && hasContext) setIsDraggingScreenshot(true);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDragLeave={() => setIsDraggingScreenshot(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setIsDraggingScreenshot(false);
-          if (!sending && hasContext) {
-            void addScreenshots(event.dataTransfer.files);
-          }
-        }}
+        onDragEnter={handleScreenshotDragEnter}
+        onDragOver={handleScreenshotDragOver}
+        onDragLeave={handleScreenshotDragLeave}
+        onDrop={handleScreenshotDrop}
         className={cn(
-          "shrink-0 px-3 py-2.5 transition-colors duration-150 ease-out",
+          "relative shrink-0 px-3 py-2.5 transition-colors duration-150 ease-out",
           !pendingSelection && "border-t border-border",
           isDraggingScreenshot && "bg-accent-subtle"
         )}
       >
+        {isDraggingScreenshot ? (
+          <div
+            className="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-lg border border-dashed border-accent bg-accent-subtle"
+            aria-hidden
+          >
+            <p className="text-[11px] font-medium text-accent">
+              Drop screenshots
+            </p>
+          </div>
+        ) : null}
         {screenshots.length > 0 ? (
           <div
             className="mb-2 flex gap-1.5 overflow-x-auto"
@@ -1101,7 +1518,88 @@ export function AiChatPanel({
             {attachmentError}
           </p>
         ) : null}
-        <div className="flex items-end gap-2">
+        <textarea
+          ref={inputRef}
+          rows={1}
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
+          maxLength={8000}
+          disabled={sending || !hasContext}
+          placeholder={
+            mode === "contour"
+              ? "Ask about the selected files..."
+              : "Ask for a change to the selected files..."
+          }
+          className="input min-h-9 w-full resize-none overflow-y-auto px-3 py-2 text-xs leading-5"
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div
+              role="radiogroup"
+              aria-label="AI mode"
+              className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-bg-inset p-0.5"
+            >
+              {AI_MODES.map((option) => {
+                const active = mode === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    disabled={sending}
+                    onClick={() => setMode(option.id)}
+                    title={option.hint}
+                    className={cn(
+                      "inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium",
+                      "transition-colors duration-150 ease-out",
+                      "disabled:cursor-not-allowed disabled:opacity-45",
+                      active
+                        ? "bg-accent-subtle text-accent"
+                        : "text-text-muted hover:text-text-secondary"
+                    )}
+                  >
+                    <option.Icon className="h-3 w-3 shrink-0" />
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            <OptionRoller
+              label="Service"
+              options={chatModel?.services ?? []}
+              value={chatModel?.provider ?? null}
+              disabled={sending || chatModelBusy}
+              onSelect={selectChatService}
+            />
+            <OptionRoller
+              label="Model"
+              options={modelOptions.map((option) => ({
+                id: option.id,
+                label: option.label,
+              }))}
+              value={chatModel?.model ?? null}
+              disabled={sending || chatModelBusy}
+              onSelect={selectChatModel}
+            />
+            <OptionRoller
+              label="Thinking level"
+              options={effortOptions.map((level) => ({
+                id: level.effort,
+                label: effortLabel(level.effort),
+                title: level.description ?? effortLabel(level.effort),
+              }))}
+              value={chatModel?.effort ?? null}
+              disabled={sending || chatModelBusy}
+              onSelect={selectChatEffort}
+            />
+          </div>
           <input
             ref={screenshotInputRef}
             type="file"
@@ -1121,41 +1619,31 @@ export function AiChatPanel({
             disabled={sending || !hasContext || screenshots.length >= MAX_AI_IMAGES}
             aria-label="Add screenshots"
             title="Add screenshots"
-            className="btn btn-ghost h-9 w-9 shrink-0 p-0"
+            className="btn btn-ghost h-8 w-8 shrink-0 p-0"
           >
             <ImagePlus className="h-3.5 w-3.5" />
           </button>
-          <textarea
-            ref={inputRef}
-            rows={1}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
-            maxLength={8000}
-            disabled={sending || !hasContext}
-            placeholder={
-              hasContext ? "Ask about the selected files..." : "Select a file first"
-            }
-            className="input min-h-9 flex-1 resize-none overflow-y-auto px-3 py-2 text-xs leading-5"
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || sending || !hasContext}
-            aria-label="Send message"
-            title="Send (Enter)"
-            className="btn btn-primary h-9 w-9 shrink-0 rounded-lg p-0"
-          >
-            {sending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
+          {sending ? (
+            <button
+              type="button"
+              onClick={handleStop}
+              aria-label="Stop"
+              title="Stop"
+              className="btn btn-primary h-8 w-8 shrink-0 rounded-lg p-0"
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim() || !hasContext}
+              aria-label="Send message"
+              title="Send (Enter)"
+              className="btn btn-primary h-8 w-8 shrink-0 rounded-lg p-0"
+            >
               <Send className="h-3.5 w-3.5" />
-            )}
-          </button>
+            </button>
+          )}
         </div>
       </form>
     </div>

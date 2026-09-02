@@ -19,6 +19,19 @@ export const EFFORT_DESCRIPTIONS: Record<string, string> = {
   ultra: "Maximum reasoning with automatic task delegation",
 };
 
+const EFFORT_LABELS: Record<string, string> = {
+  low: "Low",
+  medium: "Med",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
+  ultra: "Ultra",
+};
+
+export function effortLabel(effort: string): string {
+  return EFFORT_LABELS[effort] ?? effort;
+}
+
 const FULL_CLAUDE_EFFORTS: CliReasoningLevel[] = [
   { effort: "low", description: EFFORT_DESCRIPTIONS.low },
   { effort: "medium", description: EFFORT_DESCRIPTIONS.medium },
