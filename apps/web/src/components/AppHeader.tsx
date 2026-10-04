@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils/cn";
 import {
   User,
   Settings,
-  LogOut,
   LayoutDashboard,
   Sun,
   Moon,
@@ -68,15 +67,6 @@ export function AppHeader({ children, leftContent, className }: AppHeaderProps) 
     }
     fetchUser();
   }, []);
-
-  async function handleLogout() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      window.location.href = "/login";
-    } catch {
-      // Silently fail
-    }
-  }
 
   const initials = user ? initialsOf(user.name) : "";
 
@@ -185,11 +175,6 @@ export function AppHeader({ children, leftContent, className }: AppHeaderProps) 
               >
                 <Settings className="h-4 w-4" />
                 <span>Settings</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout}>
-                <LogOut className="h-4 w-4" />
-                <span>Log out</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
