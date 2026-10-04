@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { findLocalUser } from "@/lib/db/queries/users";
 import {
   getTexInstallState,
@@ -16,7 +16,10 @@ export async function GET() {
 }
 
 /** Starts the LaTeX install unless some TeX is already there. */
-export async function POST() {
+export async function POST(request: NextRequest) {
+  if (request.headers.get("origin") !== new URL(request.url).origin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   if (await isTexInstalled()) {
     return NextResponse.json({ tex: { installed: true, ...getTexInstallState() } });
   }

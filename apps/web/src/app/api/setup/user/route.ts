@@ -8,6 +8,9 @@ const bodySchema = z.object({ name: z.string().trim().min(1).max(255) });
 
 /** Creates the local user on first launch. Refused once one exists. */
 export async function POST(request: NextRequest) {
+  if (request.headers.get("origin") !== new URL(request.url).origin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "Please enter your name." }, { status: 400 });
