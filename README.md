@@ -96,20 +96,6 @@ Your data lives in `~/Library/Application Support/MyEditor`: `postgres/` is the
 database, `data/` is the project files, and `server.log` is the first place to
 look when something goes wrong.
 
-### Moving over from the Docker version
-
-Start Docker, stop the old stack (`docker compose down`), close MyEditor, then:
-
-```bash
-pnpm desktop:import
-```
-
-This dumps the `myeditor_postgres-data` volume, copies the project files out of
-`backslash-project-data`, and loads both into the app. It also carries over
-`SESSION_SECRET` from `.env`, because saved AI keys are encrypted with it. If
-the app already has data, it refuses; add `--force` to replace it. After that
-you can delete Docker entirely.
-
 ## When it breaks
 
 ### Builds fail with "LaTeX is not installed yet"

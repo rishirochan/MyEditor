@@ -7,8 +7,7 @@
     "db": "pnpm --filter @myeditor/desktop db",
     "dev": "pnpm --filter @myeditor/web dev",
     "desktop": "pnpm --filter @myeditor/desktop start",
-    "desktop:dist": "pnpm --filter @myeditor/desktop dist",
-    "desktop:import": "pnpm --filter @myeditor/desktop import-docker"
+    "desktop:dist": "pnpm --filter @myeditor/desktop dist"
   },
   "devDependencies": {
     "drizzle-orm": "0.45.2"

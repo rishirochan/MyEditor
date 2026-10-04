@@ -9,8 +9,7 @@
     "stage": "sh scripts/stage.sh",
     "start": "pnpm stage && electron .",
     "dist": "pnpm stage && electron-builder --mac dmg --arm64",
-    "db": "node scripts/dev-db.mjs",
-    "import-docker": "node scripts/import-docker.mjs"
+    "db": "node scripts/dev-db.mjs"
   },
   "dependencies": {
     "embedded-postgres": "16.14.0-beta.17",

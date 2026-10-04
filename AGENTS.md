@@ -16,7 +16,6 @@ Keep feature code close to its runtime module, and move cross-app contracts to `
 - `pnpm dev`: run the web app at `localhost:3000` (socket server on 3001).
 - `pnpm desktop`: build and launch the Electron app.
 - `pnpm desktop:dist`: build the DMG into `apps/desktop/dist`.
-- `pnpm desktop:import`: one-time import of data from the old Docker volumes.
 - `pnpm --filter @myeditor/web build`: production build for web.
 - `pnpm --filter @myeditor/web lint`: run ESLint (Next.js).
 - `pnpm --filter @myeditor/web typecheck`: strict TS check.
