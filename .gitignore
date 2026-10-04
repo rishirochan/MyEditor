@@ -31,5 +31,8 @@ yarn-error.log*
 
 # Data
 /data/
+/.pg-dev/
+/docker-backup/
+apps/desktop/build/
 
 .claude/
