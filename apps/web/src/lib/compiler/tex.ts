@@ -90,6 +90,7 @@ async function installTinyTex(state: TexInstallState): Promise<void> {
 
   // Stage next to the target so the final rename is atomic: a half-finished
   // install never looks like a working one.
+  await fs.mkdir(path.dirname(TINYTEX_DIR), { recursive: true });
   const staging = await fs.mkdtemp(path.join(path.dirname(TINYTEX_DIR), ".tinytex-"));
   try {
     const archive = path.join(staging, "tinytex.tar.xz");
