@@ -8,7 +8,7 @@ import {
 } from "@/lib/db/compat";
 import { builds, projects } from "@/lib/db/schema";
 import { resolveProjectAccess } from "@/lib/auth/project-access";
-import { requestCompileCancel } from "@/lib/compiler/compileQueue";
+import { requestCompileCancel } from "@/lib/compiler/runner";
 import { broadcastBuildUpdate } from "@/lib/websocket/server";
 
 // ─── POST /api/projects/[projectId]/cancel ─────────
@@ -61,12 +61,11 @@ export async function POST(
     const actorUserId = access.user?.id ?? null;
     const notifyUserId = access.user?.id ?? access.project.userId;
 
-    // Signal the worker / remove queued jobs. For active jobs this only sets a
-    // Redis cancel flag — the worker may still take time to abort Docker.
+    // Remove a queued job or abort the running latexmk process group.
     await requestCompileCancel(build.id);
 
     // Always mark the build canceled in the DB immediately so remount / polling
-    // cannot re-lock the Compile button if the worker never finishes.
+    // cannot re-lock the Compile button while the runner winds down.
     const durationMs = build.createdAt
       ? Date.now() - build.createdAt.getTime()
       : 0;

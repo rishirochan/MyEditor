@@ -11,3 +11,6 @@ onlyBuiltDependencies:
  - sharp
  - unrs-resolver
  - "@parcel/watcher"
+ - electron
+ - embedded-postgres
+ - "@embedded-postgres/darwin-arm64"

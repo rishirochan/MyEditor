@@ -3,28 +3,23 @@
 ## Project Structure & Module Organization
 This repository is a `pnpm` monorepo.
 
-- `apps/web`: Next.js 15 app (UI + API routes) under `apps/web/src`.
-- `apps/ws`: standalone Socket.IO server in `apps/ws/src`.
-- `apps/worker`: background compile worker in `apps/worker/src`.
+- `apps/web`: Next.js 15 app (UI + API routes) under `apps/web/src`. Its server also runs the compile queue and the Socket.IO server (started from `src/instrumentation.ts`).
+- `apps/desktop`: Electron shell. Starts embedded Postgres and the web server, packages the macOS DMG.
 - `packages/shared`: shared TypeScript types/constants in `packages/shared/src`.
-- `docker/`: Docker assets (Postgres init and TeX Live image).
 - `templates/`: starter LaTeX project templates.
 
 Keep feature code close to its runtime module, and move cross-app contracts to `packages/shared`.
 
 ## Build, Test, and Development Commands
-- `pnpm setup`: one-time local setup (install, build compiler image, start services, push schema).
-- `pnpm dev`: start Postgres + Redis and run web + ws + worker in one terminal.
-- `pnpm services` / `pnpm stop`: start (waiting for healthy) or stop local Postgres + Redis.
 - `pnpm install`: install all workspace dependencies.
-- `pnpm --filter @myeditor/web dev`: run the web app at `localhost:3000`.
-- `pnpm --filter @myeditor/ws dev`: run WebSocket server with watch mode.
-- `pnpm --filter @myeditor/worker dev`: run worker with watch mode.
+- `pnpm db`: run embedded Postgres for development (port 5432).
+- `pnpm dev`: run the web app at `localhost:3000` (socket server on 3001).
+- `pnpm desktop`: build and launch the Electron app.
+- `pnpm desktop:dist`: build the DMG into `apps/desktop/dist`.
 - `pnpm --filter @myeditor/web build`: production build for web.
-- `pnpm --filter @myeditor/ws build`: compile WS TypeScript to `dist/`.
 - `pnpm --filter @myeditor/web lint`: run ESLint (Next.js).
 - `pnpm --filter @myeditor/web typecheck`: strict TS check.
-- `pnpm --filter @myeditor/web db:migrate`: apply pending Drizzle migrations.
+- `pnpm --filter @myeditor/web db:migrate`: apply pending Drizzle migrations (the server also applies them on start).
 - `pnpm --filter @myeditor/web db:generate`: generate a migration from `schema.ts` changes.
 - `pnpm --filter @myeditor/web db:push`: write `schema.ts` straight to the DB, no migration recorded (local iteration only).
 
@@ -41,7 +36,7 @@ There is no dedicated automated test framework configured yet. Minimum contribut
 
 1. Run `pnpm --filter @myeditor/web lint`.
 2. Run `pnpm --filter @myeditor/web typecheck`.
-3. Run `pnpm --filter @myeditor/ws typecheck` (and other touched packages).
+3. Run typecheck for any other touched packages.
 4. Perform a manual smoke test of affected flows (editor, compile, API, or realtime updates).
 
 If you add automated tests, use `*.test.ts`/`*.test.tsx` naming and keep them near the code they validate.
@@ -58,7 +53,7 @@ For PRs, include:
 2. Linked issue (if applicable).
 3. Validation steps/commands you ran.
 4. Screenshots or short recordings for UI/editor changes.
-5. Notes for schema, env, or Docker changes.
+5. Notes for schema, env, or packaging changes.
 
 ## Security & Configuration Tips
 Never commit secrets. Keep runtime config in `.env` and update `.env.example` when adding new variables.

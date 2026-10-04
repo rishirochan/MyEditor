@@ -1,0 +1,44 @@
+{
+  "name": "@myeditor/desktop",
+  "productName": "MyEditor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "stage": "sh scripts/stage.sh",
+    "start": "pnpm stage && electron .",
+    "dist": "pnpm stage && electron-builder --mac dmg --arm64",
+    "db": "node scripts/dev-db.mjs"
+  },
+  "dependencies": {
+    "embedded-postgres": "16.14.0-beta.17",
+    "postgres": "^3.4.8"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.myeditor.app",
+    "productName": "MyEditor",
+    "files": [
+      "src/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/templates",
+        "to": "templates"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg",
+      "identity": null
+    },
+    "afterPack": "scripts/after-pack.cjs",
+    "asar": false
+  },
+  "description": "MyEditor, a LaTeX editor for your desktop"
+}

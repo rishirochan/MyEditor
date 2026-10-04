@@ -1,7 +1,6 @@
-import { Queue, Worker } from "bullmq";
-import IORedis, { type RedisOptions } from "ioredis";
 import { and, eq, inArray, lt } from "drizzle-orm";
 import { LIMITS } from "@myeditor/shared";
+import type { Engine } from "@myeditor/shared";
 
 import fs from "fs/promises";
 import path from "path";
@@ -13,43 +12,40 @@ import {
   isBuildStatusEnumValueError,
 } from "@/lib/db/compat";
 import { getProjectDir, getPdfPath, fileExists } from "@/lib/storage";
-import { runCompileContainer } from "./docker";
+import { runCompile } from "./latex";
 import { parseLatexLog } from "./logParser";
 import { injectMissingPackages } from "./preamble";
+import { JobQueue } from "./jobQueue";
 import { broadcastBuildUpdate } from "@/lib/websocket/server";
-import {
-  COMPILE_CANCEL_KEY_PREFIX,
-  COMPILE_QUEUE_NAME,
-  enqueueCompileJob,
-  requestCompileCancel,
-  type CompileJobData,
-} from "./compileQueue";
 
 const STORAGE_PATH = process.env.STORAGE_PATH || "/data";
 
 // ─── Types ───────────────────────────────────────────
 
-export interface CompileJobResult {
-  success: boolean;
-  exitCode: number;
-  logs: string;
-  pdfPath: string | null;
-  durationMs: number;
+export interface CompileJobData {
+  buildId: string;
+  projectId: string;
+  /** User notified about this build */
+  userId: string;
+  /** Owner storage root. Project files are read/written from this user scope. */
+  storageUserId?: string;
+  /** Actual user who triggered this build (for attribution and direct notifications). */
+  triggeredByUserId?: string | null;
+  engine: Engine;
+  mainFile: string;
 }
 
 export interface RunnerHealth {
   running: boolean;
   activeJobs: number;
+  waitingJobs: number;
   maxConcurrent: number;
   totalProcessed: number;
   totalErrors: number;
   uptimeMs: number;
-  redisConnected: boolean;
 }
 
 // ─── Configuration ───────────────────────────────────
-
-const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 
 const MAX_CONCURRENT_BUILDS = parseInt(
   process.env.MAX_CONCURRENT_BUILDS ||
@@ -61,168 +57,38 @@ const STALE_BUILD_TTL_MINUTES = parseInt(
   10
 );
 
-function parseRedisConnection(url: string): RedisOptions {
-  const parsed = new URL(url);
-  const dbIndex = parsed.pathname && parsed.pathname !== "/"
-    ? Number(parsed.pathname.slice(1))
-    : 0;
-
-  return {
-    host: parsed.hostname,
-    port: Number(parsed.port || (parsed.protocol === "rediss:" ? "6380" : "6379")),
-    username: parsed.username || undefined,
-    password: parsed.password || undefined,
-    db: Number.isFinite(dbIndex) ? dbIndex : 0,
-    tls: parsed.protocol === "rediss:" ? {} : undefined,
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-  };
-}
-
-const REDIS_CONNECTION = parseRedisConnection(REDIS_URL);
-
 // ─── CompileRunner Class ─────────────────────────────
 
 class CompileRunner {
-  private redis: IORedis;
-  private queue: Queue<CompileJobData> | null = null;
-  private worker: Worker<CompileJobData> | null = null;
-
-  private maxConcurrent: number;
-  private running = false;
+  readonly queue = new JobQueue<CompileJobData>(
+    MAX_CONCURRENT_BUILDS,
+    (data, signal) => this.processJob(data, signal)
+  );
   private totalProcessed = 0;
   private totalErrors = 0;
-  private startedAt: number = Date.now();
-  private activeControllers = new Map<string, AbortController>();
+  private startedAt = Date.now();
 
   constructor() {
-    this.maxConcurrent = MAX_CONCURRENT_BUILDS;
-    this.redis = new IORedis(REDIS_URL, {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      keepAlive: 10_000,
-      reconnectOnError: () => true,
-      lazyConnect: false,
-    });
-
-    this.redis.on("error", (err) => {
-      console.error("[Runner] Redis error:", err.message);
-    });
-
-    this.redis.on("connect", () => {
-      console.log("[Runner] Redis connected");
-    });
-  }
-
-  start(): void {
-    if (this.running) return;
-
-    this.queue = new Queue<CompileJobData>(COMPILE_QUEUE_NAME, {
-      connection: REDIS_CONNECTION,
-      defaultJobOptions: {
-        removeOnComplete: true,
-        removeOnFail: 1000,
-      },
-    });
-
-    this.worker = new Worker<CompileJobData>(
-      COMPILE_QUEUE_NAME,
-      async (job: { data: CompileJobData }) => this.processJob(job.data),
-      {
-        connection: REDIS_CONNECTION,
-        concurrency: this.maxConcurrent,
-      }
-    );
-
-    this.worker.on("error", (err: Error) => {
-      console.error("[Runner] Worker error:", err.message);
-    });
-
-    this.running = true;
-    this.startedAt = Date.now();
-
     // Clean stale builds from previous instance (fire-and-forget)
-    cleanStaleBuildRecords();
-
-    console.log(
-      `[Runner] Compile runner started (concurrency=${this.maxConcurrent}, queue=${COMPILE_QUEUE_NAME})`
-    );
+    void cleanStaleBuildRecords();
+    console.log(`[Runner] Compile runner started (concurrency=${MAX_CONCURRENT_BUILDS})`);
   }
 
-  async addJob(data: CompileJobData): Promise<void> {
-    if (!this.running) {
-      this.start();
-    }
-    if (!this.queue) {
-      throw new Error("Queue not initialized");
-    }
-
-    try {
-      await this.queue.add("compile", data, {
-        jobId: data.buildId,
-      });
-      console.log(`[Runner] Job queued: ${data.buildId}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message.includes("Job is already waiting") || message.includes("Job already exists")) {
-        console.warn(`[Runner] Duplicate job ignored: ${data.buildId}`);
-        return;
-      }
-      throw err;
-    }
-  }
-
-  private async processJob(data: CompileJobData): Promise<void> {
+  private async processJob(data: CompileJobData, signal: AbortSignal): Promise<void> {
     const { buildId, projectId, userId, engine, mainFile } = data;
     const storageUserId = data.storageUserId ?? userId;
     const notifyUserId = userId;
     const actorUserId = data.triggeredByUserId ?? null;
     const startTime = Date.now();
-    const controller = new AbortController();
-    let cancelPollTimer: ReturnType<typeof setInterval> | null = null;
-    let cancelCheckInFlight = false;
 
     // Isolated build directory to prevent race conditions between concurrent builds
     const buildDir = path.join(STORAGE_PATH, "builds", buildId);
 
     try {
-      this.activeControllers.set(buildId, controller);
-
-      // Honor cancel that arrived before this worker picked up the job.
-      if (await this.isBuildCanceled(buildId)) {
-        await this.handleCanceledBuild(data, "Build canceled by user.");
-        return;
-      }
-
-      // Watch distributed cancel flag while this build is running.
-      cancelPollTimer = setInterval(() => {
-        if (cancelCheckInFlight || controller.signal.aborted) return;
-        cancelCheckInFlight = true;
-        void this.isBuildCanceled(buildId)
-          .then((canceled) => {
-            if (canceled) {
-              controller.abort();
-            }
-          })
-          .catch((err) => {
-            console.error(
-              `[Runner] Cancel check failed for ${buildId}:`,
-              err instanceof Error ? err.message : err
-            );
-          })
-          .finally(() => {
-            cancelCheckInFlight = false;
-          });
-      }, 500);
-
       // Step 1: Mark as compiling (no-op if cancel API already finalized the row)
       const markedCompiling = await updateBuildStatus(buildId, "compiling");
       if (!markedCompiling) {
-        // Cancel won the race — don't broadcast "compiling" or run Docker.
-        if (!controller.signal.aborted) {
-          controller.abort();
-        }
-        await this.handleCanceledBuild(data, "Build canceled by user.");
+        // Cancel API already finalized the row — don't broadcast or compile.
         return;
       }
 
@@ -242,27 +108,25 @@ class CompileRunner {
       // Step 2.5: Auto-inject missing LaTeX packages into the build copy
       await injectMissingPackages(buildDir, mainFile);
 
-      // Step 3: Run the Docker container against the isolated build dir
-      const containerResult = await runCompileContainer({
+      // Step 3: Run latexmk against the isolated build dir
+      const result = await runCompile({
         projectDir: buildDir,
         mainFile,
         engine,
-        signal: controller.signal,
+        signal,
       });
-
-      console.log(`[Runner] Container finished for job ${buildId}, processing results...`);
 
       const durationMs = Date.now() - startTime;
 
-      const parsedEntries = parseLatexLog(containerResult.logs);
+      const parsedEntries = parseLatexLog(result.logs);
       const hasErrors = parsedEntries.some((e) => e.type === "error");
-      const buildErrors = containerResult.canceled
+      const buildErrors = result.canceled
         ? []
         : parsedEntries.filter((e) => e.type === "error");
       let pdfExists = false;
       const pdfOutputPath = getPdfPath(storageUserId, projectId, mainFile);
 
-      if (!containerResult.canceled) {
+      if (!result.canceled) {
         // Check for PDF in the build directory
         const pdfName = mainFile.replace(/\.tex$/, ".pdf");
         const buildPdfPath = path.join(buildDir, pdfName);
@@ -279,11 +143,11 @@ class CompileRunner {
 
       // Determine final status
       let finalStatus: "success" | "error" | "timeout" | "canceled";
-      if (containerResult.canceled) {
+      if (result.canceled) {
         finalStatus = "canceled";
-      } else if (containerResult.timedOut) {
+      } else if (result.timedOut) {
         finalStatus = "timeout";
-      } else if (containerResult.exitCode !== 0 || hasErrors || !pdfExists) {
+      } else if (result.exitCode !== 0 || hasErrors || !pdfExists) {
         finalStatus = "error";
       } else {
         finalStatus = "success";
@@ -291,13 +155,13 @@ class CompileRunner {
 
       // Step 4: Update database
       const completionPatch = {
-        engine: containerResult.engineUsed,
+        engine: result.engineUsed,
         status: finalStatus,
-        logs: containerResult.canceled
+        logs: result.canceled
           ? "Build canceled by user."
-          : containerResult.logs,
+          : result.logs,
         durationMs,
-        exitCode: containerResult.exitCode,
+        exitCode: result.exitCode,
         pdfPath: pdfExists ? pdfOutputPath : null,
         completedAt: new Date(),
       };
@@ -328,9 +192,9 @@ class CompileRunner {
         pdfUrl: pdfExists
           ? `/api/projects/${projectId}/pdf?mainFile=${encodeURIComponent(mainFile)}`
           : null,
-        logs: containerResult.canceled
+        logs: result.canceled
           ? "Build canceled by user."
-          : containerResult.logs,
+          : result.logs,
         durationMs,
         errors: buildErrors,
         triggeredByUserId: actorUserId,
@@ -367,12 +231,7 @@ class CompileRunner {
 
       this.totalErrors++;
       console.error(`[Runner] Job ${buildId} failed: ${errorMessage}`);
-      throw err;
     } finally {
-      this.activeControllers.delete(buildId);
-      if (cancelPollTimer) {
-        clearInterval(cancelPollTimer);
-      }
       // Always clean up the isolated build directory
       try {
         await fs.rm(buildDir, { recursive: true, force: true });
@@ -384,122 +243,14 @@ class CompileRunner {
 
   getHealth(): RunnerHealth {
     return {
-      running: this.running,
-      activeJobs: this.activeControllers.size,
-      maxConcurrent: this.maxConcurrent,
+      running: true,
+      activeJobs: this.queue.active,
+      waitingJobs: this.queue.waiting,
+      maxConcurrent: MAX_CONCURRENT_BUILDS,
       totalProcessed: this.totalProcessed,
       totalErrors: this.totalErrors,
       uptimeMs: Date.now() - this.startedAt,
-      redisConnected: this.redis.status === "ready",
     };
-  }
-
-  async shutdown(): Promise<void> {
-    console.log("[Runner] Shutting down compile runner...");
-    this.running = false;
-
-    if (this.worker) {
-      await this.worker.close();
-      this.worker = null;
-    }
-
-    if (this.queue) {
-      await this.queue.close();
-      this.queue = null;
-    }
-
-    try {
-      await this.redis.quit();
-    } catch {
-      // ignore
-    }
-
-    console.log("[Runner] Compile runner stopped");
-  }
-
-  async cancelBuild(buildId: string): Promise<{ wasQueued: boolean; wasRunning: boolean }> {
-    const localRunning = this.activeControllers.has(buildId);
-    if (localRunning) {
-      this.activeControllers.get(buildId)?.abort();
-    }
-
-    let wasQueued = false;
-    let wasRunning = localRunning;
-
-    if (!this.running) {
-      this.start();
-    }
-
-    if (this.queue) {
-      const job = await this.queue.getJob(buildId);
-      if (job) {
-        const state = await job.getState();
-        if (state === "active") {
-          wasRunning = true;
-        }
-        if (state === "waiting" || state === "delayed" || state === "prioritized") {
-          await job.remove();
-          wasQueued = true;
-        }
-      }
-    }
-
-    await this.redis.setex(`${COMPILE_CANCEL_KEY_PREFIX}${buildId}`, 900, "1");
-
-    return { wasQueued, wasRunning };
-  }
-
-  private async isBuildCanceled(buildId: string): Promise<boolean> {
-    const key = `${COMPILE_CANCEL_KEY_PREFIX}${buildId}`;
-    const canceled = await this.redis.get(key);
-    if (canceled) {
-      await this.redis.del(key);
-      return true;
-    }
-    return false;
-  }
-
-  async handleCanceledBuild(
-    data: CompileJobData,
-    message: string
-  ): Promise<void> {
-    const notifyUserId = data.userId;
-    const actorUserId = data.triggeredByUserId ?? null;
-    const canceledPatch = {
-      status: "canceled" as const,
-      logs: message,
-      exitCode: -1,
-      completedAt: new Date(),
-    };
-
-    try {
-      await db
-        .update(builds)
-        .set(canceledPatch)
-        .where(eq(builds.id, data.buildId));
-    } catch (updateErr) {
-      if (isBuildStatusEnumValueError(updateErr)) {
-        await ensureBuildStatusEnumCompat();
-        await db
-          .update(builds)
-          .set(canceledPatch)
-          .where(eq(builds.id, data.buildId));
-      } else {
-        throw updateErr;
-      }
-    }
-
-    broadcastBuildUpdate(notifyUserId, {
-      projectId: data.projectId,
-      buildId: data.buildId,
-      mainFile: data.mainFile,
-      status: "canceled",
-      pdfUrl: null,
-      logs: message,
-      durationMs: 0,
-      errors: [],
-      triggeredByUserId: actorUserId,
-    });
   }
 }
 
@@ -586,51 +337,27 @@ async function cleanStaleBuildRecords(): Promise<void> {
 
 // ─── Singleton (survives Next.js hot-reloads) ────────
 
-const RUNNER_KEY = "__myeditor_compile_runner__" as const;
-
-function getRunnerInstance(): CompileRunner | null {
-  return (
-    ((globalThis as unknown) as Record<string, CompileRunner | undefined>)[RUNNER_KEY] ?? null
-  );
-}
-
-function setRunnerInstance(runner: CompileRunner | null): void {
-  ((globalThis as unknown) as Record<string, CompileRunner | null>)[RUNNER_KEY] = runner;
-}
+const globalForRunner = globalThis as typeof globalThis & {
+  __myeditorCompileRunner?: CompileRunner;
+};
 
 // ─── Public API ──────────────────────────────────────
 
 export function startCompileRunner(): CompileRunner {
-  const existing = getRunnerInstance();
-  if (existing) {
-    return existing;
-  }
-
-  const runner = new CompileRunner();
-  setRunnerInstance(runner);
-  runner.start();
-  return runner;
+  globalForRunner.__myeditorCompileRunner ??= new CompileRunner();
+  return globalForRunner.__myeditorCompileRunner;
 }
 
-export async function addCompileJob(data: CompileJobData): Promise<void> {
-  await enqueueCompileJob(data);
+export async function enqueueCompileJob(data: CompileJobData): Promise<void> {
+  startCompileRunner().queue.add(data.buildId, data);
 }
 
-export async function cancelCompileJob(
+export async function requestCompileCancel(
   buildId: string
 ): Promise<{ wasQueued: boolean; wasRunning: boolean }> {
-  return requestCompileCancel(buildId);
-}
-
-export async function shutdownRunner(): Promise<void> {
-  const runner = getRunnerInstance();
-  if (runner) {
-    await runner.shutdown();
-    setRunnerInstance(null);
-  }
+  return startCompileRunner().queue.cancel(buildId);
 }
 
 export function getRunnerHealth(): RunnerHealth | null {
-  const runner = getRunnerInstance();
-  return runner ? runner.getHealth() : null;
+  return globalForRunner.__myeditorCompileRunner?.getHealth() ?? null;
 }

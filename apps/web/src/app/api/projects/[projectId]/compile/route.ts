@@ -1,13 +1,8 @@
 import { db } from "@/lib/db";
 import { projects, projectFiles, builds } from "@/lib/db/schema";
 import { resolveProjectAccess } from "@/lib/auth/project-access";
-import { enqueueCompileJob } from "@/lib/compiler/compileQueue";
+import { enqueueCompileJob } from "@/lib/compiler/runner";
 import { broadcastBuildUpdate } from "@/lib/websocket/server";
-import { healthCheck as dockerHealthCheck, getDockerClient } from "@/lib/compiler/docker";
-import {
-  isDedicatedWorkerHealthy,
-  isWorkerExpectedInWeb,
-} from "@/lib/compiler/workerHealth";
 import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
@@ -50,7 +45,6 @@ export async function POST(
     const storageUserId = project.userId;
     const actorUserId = access.user?.id ?? null;
     const buildUserId = access.user?.id ?? storageUserId;
-    const runnerExpectedInWeb = isWorkerExpectedInWeb();
     let compileEngine: Engine = project.engine;
     let mainFile = project.mainFile;
 
@@ -103,48 +97,6 @@ export async function POST(
         { error: "Document root not found" },
         { status: 400 }
       );
-    }
-
-    if (runnerExpectedInWeb) {
-      // ── Pre-flight: verify Docker is reachable ───────
-      const dockerOk = await dockerHealthCheck();
-      if (!dockerOk) {
-        console.error("[Compile] Docker daemon is not reachable");
-        return NextResponse.json(
-          { error: "Compilation service unavailable — Docker daemon not reachable" },
-          { status: 503 }
-        );
-      }
-
-      // ── Pre-flight: verify compiler image exists ─────
-      try {
-        const docker = getDockerClient();
-        const compilerImage = process.env.COMPILER_IMAGE || "myeditor-compiler";
-        const images = await docker.listImages({
-          filters: { reference: [compilerImage] },
-        });
-        if (images.length === 0) {
-          console.error(`[Compile] Compiler image "${compilerImage}" not found`);
-          return NextResponse.json(
-            { error: `Compiler image "${compilerImage}" not found on Docker host` },
-            { status: 503 }
-          );
-        }
-      } catch (imgErr) {
-        console.error("[Compile] Failed to check compiler image:", imgErr);
-        return NextResponse.json(
-          { error: "Compilation service unavailable — unable to verify compiler image" },
-          { status: 503 }
-        );
-      }
-    } else {
-      const workerHealthy = await isDedicatedWorkerHealthy();
-      if (!workerHealthy) {
-        return NextResponse.json(
-          { error: "Compilation worker unavailable — try again shortly" },
-          { status: 503 }
-        );
-      }
     }
 
     const buildId = uuidv4();

@@ -81,54 +81,13 @@ interface UseWebSocketOptions {
 // ─── WebSocket URL Resolution ──────────────────────
 
 /**
- * Resolves the WebSocket server URL and socket.io path at **runtime**.
- *
- * Behind a reverse proxy (HTTPS / production):
- *   Dokploy routes /ws/* → ws:3001 (stripping the /ws prefix).
- *   So we connect to the same host with path "/ws/socket.io".
- *
- * Direct connection (HTTP / local dev):
- *   Connect to the same hostname on port 3001, path "/socket.io".
+ * The socket server listens on the web port + 1 (3000/3001 in dev; the
+ * desktop app picks a free pair).
  */
+// ponytail: port convention instead of config; pass the port in if it ever needs to vary independently.
 function getWsConfig(): { url: string; path: string } {
-  // Build-time override (only works if set during `next build`)
-  if (process.env.NEXT_PUBLIC_WS_URL) {
-    const envUrl = process.env.NEXT_PUBLIC_WS_URL;
-    // If the env URL contains a path component (e.g. /ws), use it as a path prefix
-    try {
-      const parsed = new URL(envUrl);
-      if (parsed.pathname && parsed.pathname !== "/") {
-        return {
-          url: parsed.origin,
-          path: `${parsed.pathname}/socket.io`,
-        };
-      }
-    } catch {
-      // Fall through
-    }
-    return { url: envUrl, path: "/socket.io" };
-  }
-
-  if (typeof window !== "undefined") {
-    const protocol = window.location.protocol === "https:" ? "https" : "http";
-    const host = window.location.host; // includes port if non-standard
-
-    // Behind HTTPS (production with reverse proxy) → use /ws path prefix
-    if (window.location.protocol === "https:") {
-      return {
-        url: `${protocol}://${host}`,
-        path: "/ws/socket.io",
-      };
-    }
-
-    // Plain HTTP (local dev / bare Docker Compose) → direct port 3001
-    return {
-      url: `${protocol}://${window.location.hostname}:3001`,
-      path: "/socket.io",
-    };
-  }
-
-  return { url: "http://localhost:3001", path: "/socket.io" };
+  const port = Number(window.location.port || 80) + 1;
+  return { url: `http://${window.location.hostname}:${port}`, path: "/socket.io" };
 }
 
 // ─── Hook ──────────────────────────────────────────

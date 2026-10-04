@@ -1,38 +1,5 @@
-import IORedis from "ioredis";
 import type { ParsedLogEntry } from "@myeditor/shared";
-
-// ─── Redis Publisher ───────────────────────────────
-
-const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
-const BUILD_CHANNEL = "build:updates";
-
-let publisher: IORedis | null = null;
-
-function getPublisher(): IORedis {
-  if (!publisher) {
-    publisher = new IORedis(REDIS_URL, {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      keepAlive: 10_000,
-      retryStrategy(times: number) {
-        return Math.min(times * 200, 5000);
-      },
-      reconnectOnError() {
-        return true;
-      },
-    });
-
-    publisher.on("error", (err) => {
-      console.error("[Redis Pub] Connection error:", err.message);
-    });
-
-    publisher.on("connect", () => {
-      console.log("[Redis Pub] Publisher connected");
-    });
-  }
-
-  return publisher;
-}
+import { getEventBus, BUILD_EVENT, FILE_EVENT } from "./bus";
 
 // ─── Build Update Payloads ─────────────────────────
 
@@ -88,24 +55,18 @@ export function getProjectRoom(projectId: string): string {
   return `project:${projectId}`;
 }
 
-// ─── Broadcast via Redis Pub/Sub ───────────────────
+// ─── Broadcast via in-process bus ──────────────────
 
 /**
- * Publishes a build update to the Redis `build:updates` channel.
- * The standalone WebSocket server subscribes to this channel
- * and broadcasts the update to the appropriate client rooms.
+ * Hands a build update to the socket server (socketServer.ts), which
+ * broadcasts it to the appropriate client rooms.
  */
 export function broadcastBuildUpdate(
   userId: string,
   payload: BuildUpdatePayload
 ): void {
   try {
-    const message = JSON.stringify({ userId, payload });
-    getPublisher()
-      .publish(BUILD_CHANNEL, message)
-      .catch((err: Error) => {
-        console.error("[Broadcast] Redis publish error:", err.message);
-      });
+    getEventBus().emit(BUILD_EVENT, JSON.stringify({ userId, payload }));
   } catch (err) {
     console.error(
       "[Broadcast] Failed to publish build update:",
@@ -114,9 +75,7 @@ export function broadcastBuildUpdate(
   }
 }
 
-// ─── File Events via Redis Pub/Sub ─────────────────
-
-const FILE_CHANNEL = "file:updates";
+// ─── File Events ───────────────────────────────────
 
 export interface FileEventPayload {
   type: "file:created" | "file:deleted" | "file:saved";
@@ -128,17 +87,12 @@ export interface FileEventPayload {
 }
 
 /**
- * Publishes a file event to the Redis `file:updates` channel.
- * The standalone WS server forwards these to the project room.
+ * Hands a file event to the socket server, which forwards it to the
+ * project room.
  */
 export function broadcastFileEvent(payload: FileEventPayload): void {
   try {
-    const message = JSON.stringify(payload);
-    getPublisher()
-      .publish(FILE_CHANNEL, message)
-      .catch((err: Error) => {
-        console.error("[Broadcast] Redis file event publish error:", err.message);
-      });
+    getEventBus().emit(FILE_EVENT, JSON.stringify(payload));
   } catch (err) {
     console.error(
       "[Broadcast] Failed to publish file event:",

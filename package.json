@@ -3,12 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "setup": "pnpm install && docker compose build compiler-image && pnpm services && pnpm --filter @myeditor/web db:migrate",
-    "start": "docker compose up -d",
-    "bridge": "pnpm --filter @myeditor/cli-bridge start",
-    "services": "docker compose -p myeditor-dev -f docker-compose.dev.yml up -d --wait",
-    "dev": "pnpm services && pnpm -r --parallel dev",
-    "stop": "docker compose -p myeditor-dev -f docker-compose.dev.yml down"
+    "setup": "pnpm install",
+    "db": "pnpm --filter @myeditor/desktop db",
+    "dev": "pnpm --filter @myeditor/web dev",
+    "desktop": "pnpm --filter @myeditor/desktop start",
+    "desktop:dist": "pnpm --filter @myeditor/desktop dist"
   },
   "devDependencies": {
     "drizzle-orm": "0.45.2"
@@ -19,7 +18,10 @@
       "@tailwindcss/oxide",
       "sharp",
       "unrs-resolver",
-      "@parcel/watcher"
+      "@parcel/watcher",
+      "electron",
+      "embedded-postgres",
+      "@embedded-postgres/darwin-arm64"
     ]
   }
 }
