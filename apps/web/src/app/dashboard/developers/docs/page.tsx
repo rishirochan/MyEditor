@@ -476,7 +476,7 @@ curl "${BASE}/compile/JOB_ID/output?format=pdf" \\
             type: "string",
             required: false,
             description:
-              'Template: "blank", "article", "thesis", "beamer", "letter". Default: "blank".',
+              'Template: "blank", "article", "thesis", "beamer", "letter", "resume". Default: "blank".',
           },
           engine: {
             type: "string",

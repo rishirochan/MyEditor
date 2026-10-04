@@ -8,7 +8,7 @@ export type BuildStatus =
   | "timeout"
   | "canceled";
 
-export type TemplateName = "blank" | "article" | "thesis" | "beamer" | "letter";
+export type TemplateName = "blank" | "article" | "thesis" | "beamer" | "letter" | "resume";
 
 export interface Project {
   id: string;

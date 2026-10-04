@@ -18,6 +18,7 @@ import {
   GraduationCap,
   Presentation,
   Mail,
+  FileUser,
   Trash2,
   Pencil,
   MoreVertical,
@@ -84,7 +85,7 @@ interface SharedProject {
 }
 
 
-type Template = "blank" | "article" | "thesis" | "beamer" | "letter";
+type Template = "blank" | "article" | "thesis" | "beamer" | "letter" | "resume";
 type EngineOption = "auto" | "pdflatex" | "xelatex" | "lualatex" | "latex";
 
 // ─── Helpers ────────────────────────────────────────
@@ -142,14 +143,18 @@ const TEMPLATES: {
   name: string;
   hint: string;
   Icon: LucideIcon;
-  wide?: boolean;
 }[] = [
   {
     value: "blank",
     name: "Blank",
     hint: "One empty .tex file. Bring your own preamble.",
     Icon: File,
-    wide: true,
+  },
+  {
+    value: "resume",
+    name: "Resume",
+    hint: "One-page resume, ATS-friendly (Jake's Resume).",
+    Icon: FileUser,
   },
   {
     value: "article",
@@ -550,7 +555,7 @@ function TemplatePicker({
 }) {
   return (
     <div role="radiogroup" aria-label="Template" className="grid gap-2 sm:grid-cols-2">
-      {TEMPLATES.map(({ value: templateValue, name, hint, Icon, wide }) => {
+      {TEMPLATES.map(({ value: templateValue, name, hint, Icon }) => {
         const selected = templateValue === value;
 
         return (
@@ -562,7 +567,6 @@ function TemplatePicker({
             onClick={() => onChange(templateValue)}
             className={cn(
               "flex items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150",
-              wide && "sm:col-span-2",
               selected
                 ? "border-accent-muted bg-accent-subtle"
                 : "border-border bg-bg-inset hover:border-border-strong"

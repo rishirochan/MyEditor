@@ -57,7 +57,7 @@ export const createProjectSchema = z.object({
   description: z.string().max(1000).optional(),
   engine: z.enum(["auto", "pdflatex", "xelatex", "lualatex", "latex"]).optional(),
   template: z
-    .enum(["blank", "article", "thesis", "beamer", "letter"])
+    .enum(["blank", "article", "thesis", "beamer", "letter", "resume"])
     .optional(),
 });
 
