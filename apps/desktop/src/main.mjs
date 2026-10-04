@@ -5,6 +5,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { databaseUrl, startPostgres } from "./postgres.mjs";
+import { waitForServer } from "./server.mjs";
 
 const resources = app.isPackaged
   ? process.resourcesPath
@@ -63,20 +64,6 @@ function sessionSecret() {
     fs.writeFileSync(file, randomBytes(48).toString("hex"), { mode: 0o600 });
   }
   return fs.readFileSync(file, "utf8").trim();
-}
-
-async function waitForServer(url, child) {
-  let exited = false;
-  child.once("exit", () => { exited = true; });
-  for (let i = 0; i < 240 && !exited; i++) {
-    try {
-      await fetch(url);
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 250));
-    }
-  }
-  throw new Error(exited ? "The app server exited during startup." : "The app server did not start in time.");
 }
 
 async function start() {
