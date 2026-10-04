@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withApiKey } from "@/lib/auth/apikey";
 import { getAuthorizedAsyncCompileJob } from "@/lib/compiler/asyncCompileAccess";
-import { requestAsyncCompileCancel } from "@/lib/compiler/asyncCompileQueue";
+import { requestAsyncCompileCancel } from "@/lib/compiler/asyncCompileRunner";
 import {
   computeAsyncCompileExpiryIso,
   patchAsyncCompileMetadata,

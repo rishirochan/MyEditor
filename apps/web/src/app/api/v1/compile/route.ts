@@ -1,13 +1,9 @@
 import { withApiKey } from "@/lib/auth/apikey";
-import { enqueueAsyncCompileJob } from "@/lib/compiler/asyncCompileQueue";
+import { enqueueAsyncCompileJob } from "@/lib/compiler/asyncCompileRunner";
 import {
   createAsyncCompileJob,
   deleteAsyncCompileJob,
 } from "@/lib/compiler/asyncCompileStore";
-import {
-  isDedicatedWorkerHealthy,
-  isWorkerExpectedInWeb,
-} from "@/lib/compiler/workerHealth";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 
@@ -139,16 +135,6 @@ export async function POST(request: NextRequest) {
           },
           { status: 400 }
         );
-      }
-
-      if (!isWorkerExpectedInWeb()) {
-        const workerHealthy = await isDedicatedWorkerHealthy();
-        if (!workerHealthy) {
-          return NextResponse.json(
-            { error: "Compilation worker unavailable — try again shortly" },
-            { status: 503 }
-          );
-        }
       }
 
       // ── Enqueue async job ─────────────────────────

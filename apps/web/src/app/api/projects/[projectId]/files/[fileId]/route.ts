@@ -11,7 +11,7 @@ import * as storage from "@/lib/storage";
 import { eq, and, like, or } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
-import { enqueueCompileJob } from "@/lib/compiler/compileQueue";
+import { enqueueCompileJob } from "@/lib/compiler/runner";
 import { v4 as uuidv4 } from "uuid";
 
 // ─── GET /api/projects/[projectId]/files/[fileId] ──

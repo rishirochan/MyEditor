@@ -1,6 +1,7 @@
 import { createServer } from "http";
-import { Server as SocketIOServer } from "socket.io";
-import IORedis from "ioredis";
+import { Server as SocketIOServer, type Socket } from "socket.io";
+import { getEventBus, BUILD_EVENT, FILE_EVENT } from "./bus";
+import type { BuildCompletePayload, BuildUpdatePayload } from "./server";
 import postgres from "postgres";
 import { randomUUID } from "crypto";
 import { jwtVerify } from "jose";
@@ -59,7 +60,7 @@ interface DocChange {
 interface ServerToClientEvents {
   "self:identity": (data: { userId: string; name: string; email: string; color: string }) => void;
   "build:status": (data: { projectId: string; buildId: string; mainFile: string; status: "queued" | "compiling"; triggeredByUserId?: string | null }) => void;
-  "build:complete": (data: { projectId: string; buildId: string; mainFile: string; status: string; pdfUrl: string | null; logs: string; durationMs: number; errors: any[]; triggeredByUserId?: string | null }) => void;
+  "build:complete": (data: { projectId: string; buildId: string; mainFile: string; status: string; pdfUrl: string | null; logs: string; durationMs: number; errors: unknown[]; triggeredByUserId?: string | null }) => void;
   "presence:users": (data: { users: PresenceUser[] }) => void;
   "presence:joined": (data: { user: PresenceUser }) => void;
   "presence:left": (data: { userId: string }) => void;
@@ -88,12 +89,9 @@ interface ClientToServerEvents {
 
 // ─── Configuration ─────────────────────────────────
 
-const PORT = parseInt(process.env.WS_PORT || "3001", 10);
-const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const DATABASE_URL =
   process.env.DATABASE_URL ||
   "postgresql://backslash:backslash@backslash-postgres:5432/backslash";
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-to-a-random-64-char-string";
 
 // ─── Presence Colors ───────────────────────────────
@@ -244,24 +242,6 @@ async function checkProjectAccess(
   }
 }
 
-// ─── Redis Pub/Sub ─────────────────────────────────
-
-const subscriber = new IORedis(REDIS_URL, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-  retryStrategy(times: number) {
-    return Math.min(times * 200, 5000);
-  },
-});
-
-subscriber.on("error", (err) => {
-  console.error("[Redis] Subscriber error:", err.message);
-});
-
-subscriber.on("connect", () => {
-  console.log("[Redis] Subscriber connected");
-});
-
 // ─── Socket.IO Server ──────────────────────────────
 
 const httpServer = createServer((_req, res) => {
@@ -271,14 +251,13 @@ const httpServer = createServer((_req, res) => {
 });
 
 const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+  // Only the app itself (served from loopback) may connect.
   cors: {
-    origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN.split(","),
+    origin: [/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/],
     credentials: true,
   },
   transports: ["websocket", "polling"],
-  path: process.env.WS_PATH_PREFIX
-    ? `${process.env.WS_PATH_PREFIX}/socket.io`
-    : "/socket.io",
+  path: "/socket.io",
   pingInterval: 25000,
   pingTimeout: 20000,
 });
@@ -639,7 +618,7 @@ io.on("connection", (socket) => {
 /**
  * Remove a socket from a project room and clean up presence.
  */
-function leaveProject(socket: any, projectId: string) {
+function leaveProject(socket: Socket, projectId: string) {
   const userId = socket.data.userId;
 
   socket.leave(getProjectRoom(projectId));
@@ -664,35 +643,28 @@ function leaveProject(socket: any, projectId: string) {
   }
 }
 
-// ─── Redis Subscription ────────────────────────────
+// ─── In-process Event Bus ──────────────────────────
 
-const BUILD_CHANNEL = "build:updates";
-const FILE_CHANNEL = "file:updates";
-
-subscriber.subscribe(BUILD_CHANNEL, FILE_CHANNEL, (err) => {
-  if (err) {
-    console.error("[Redis] Failed to subscribe:", err);
-  } else {
-    console.log(`[Redis] Subscribed to ${BUILD_CHANNEL}, ${FILE_CHANNEL}`);
+const bus = getEventBus();
+bus.on(BUILD_EVENT, (message: string) => {
+  try {
+    handleBuildUpdate(message);
+  } catch (err) {
+    console.error("[WS] Failed to process build update:", err);
   }
 });
-
-subscriber.on("message", (channel, message) => {
+bus.on(FILE_EVENT, (message: string) => {
   try {
-    if (channel === BUILD_CHANNEL) {
-      handleBuildUpdate(message);
-    } else if (channel === FILE_CHANNEL) {
-      handleFileUpdate(message);
-    }
+    handleFileUpdate(message);
   } catch (err) {
-    console.error("[WS] Failed to process Redis message:", err);
+    console.error("[WS] Failed to process file update:", err);
   }
 });
 
 function handleBuildUpdate(message: string) {
   const { userId, payload } = JSON.parse(message) as {
     userId: string;
-    payload: any;
+    payload: BuildUpdatePayload & Partial<Omit<BuildCompletePayload, "status">>;
   };
 
   const userRoom = getUserRoom(userId);
@@ -723,7 +695,7 @@ function handleBuildUpdate(message: string) {
       projectId: payload.projectId,
       buildId: payload.buildId,
       mainFile: payload.mainFile,
-      status: payload.status,
+      status: payload.status as "queued" | "compiling",
       triggeredByUserId,
     });
   }
@@ -822,45 +794,11 @@ function handleFileUpdate(message: string) {
 
 // ─── Start Server ──────────────────────────────────
 
-httpServer.listen(PORT, "0.0.0.0", () => {
-  console.log("");
-  console.log("╔══════════════════════════════════════╗");
-  console.log("║   MyEditor WebSocket Server          ║");
-  console.log("╠══════════════════════════════════════╣");
-  console.log(`║  Port:     ${String(PORT).padEnd(25)}║`);
-  console.log(`║  Redis:    ${REDIS_URL.padEnd(25)}║`);
-  console.log(`║  Database: [configured]${" ".repeat(14)}║`);
-  console.log(`║  CORS:     ${CORS_ORIGIN.substring(0, 25).padEnd(25)}║`);
-  console.log("╚══════════════════════════════════════╝");
-  console.log("");
-  console.log("[WS] Server ready — waiting for connections...");
+const PORT = parseInt(process.env.WS_PORT || "3001", 10);
+
+httpServer.listen(PORT, "127.0.0.1", () => {
+  console.log(`[WS] Socket server listening on 127.0.0.1:${PORT}`);
 });
-
-// ─── Graceful Shutdown ─────────────────────────────
-
-async function shutdown(signal: string) {
-  console.log(`\n[WS] Received ${signal}, shutting down...`);
-
-  // Disconnect all clients
-  const sockets = await io.fetchSockets();
-  for (const socket of sockets) {
-    socket.disconnect(true);
-  }
-
-  // Close servers
-  await new Promise<void>((resolve) => {
-    io.close(() => resolve());
-  });
-
-  subscriber.disconnect();
-  await sql.end();
-
-  console.log("[WS] Shutdown complete");
-  process.exit(0);
-}
-
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 // ─── Helpers ───────────────────────────────────────
 

@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   output: "standalone",
   outputFileTracingRoot: path.join(__dirname, "../.."),
-  serverExternalPackages: ["dockerode", "bullmq", "ioredis"],
+  serverExternalPackages: ["socket.io"],
   webpack: (config) => {
     config.resolve.alias.canvas = false;
     return config;

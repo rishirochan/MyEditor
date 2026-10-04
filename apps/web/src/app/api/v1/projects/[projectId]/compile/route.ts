@@ -1,9 +1,8 @@
 import { db } from "@/lib/db";
 import { projects, builds } from "@/lib/db/schema";
 import { withApiKey } from "@/lib/auth/apikey";
-import { enqueueCompileJob } from "@/lib/compiler/compileQueue";
+import { enqueueCompileJob } from "@/lib/compiler/runner";
 import { broadcastBuildUpdate } from "@/lib/websocket/server";
-import { isDedicatedWorkerHealthy, isWorkerExpectedInWeb } from "@/lib/compiler/workerHealth";
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
@@ -43,16 +42,6 @@ export async function POST(
           { error: "Project not found" },
           { status: 404 }
         );
-      }
-
-      if (!isWorkerExpectedInWeb()) {
-        const workerHealthy = await isDedicatedWorkerHealthy();
-        if (!workerHealthy) {
-          return NextResponse.json(
-            { error: "Compilation worker unavailable — try again shortly" },
-            { status: 503 }
-          );
-        }
       }
 
       let compileEngine: Engine = project.engine;
