@@ -16,5 +16,12 @@ export async function GET(request: NextRequest) {
   const target = redirect?.startsWith("/") && !redirect.startsWith("//")
     ? redirect
     : "/dashboard";
-  return NextResponse.redirect(new URL(target, request.url));
+  let url = new URL("/dashboard", request.url);
+  try {
+    const resolved = new URL(target, request.url);
+    if (resolved.origin === url.origin) url = resolved;
+  } catch {
+    // Malformed redirect URLs also fall back to the dashboard.
+  }
+  return NextResponse.redirect(url);
 }
