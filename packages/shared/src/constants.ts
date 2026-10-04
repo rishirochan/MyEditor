@@ -9,7 +9,7 @@ export const ENGINE_FLAGS: Record<Exclude<Engine, "auto">, string> = {
   lualatex: "-lualatex",
 };
 
-export const TEMPLATES: TemplateName[] = ["blank", "article", "thesis", "beamer", "letter"];
+export const TEMPLATES: TemplateName[] = ["blank", "article", "thesis", "beamer", "letter", "resume"];
 
 export const TEMPLATE_LABELS: Record<TemplateName, string> = {
   blank: "Blank Document",
@@ -17,6 +17,7 @@ export const TEMPLATE_LABELS: Record<TemplateName, string> = {
   thesis: "Thesis",
   beamer: "Presentation (Beamer)",
   letter: "Letter",
+  resume: "Resume",
 };
 
 export const ALLOWED_EXTENSIONS = new Set([
