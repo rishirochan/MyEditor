@@ -70,23 +70,24 @@ Sensible defaults, MIT licensed, no telemetry.
 ## Set it up
 
 MyEditor is a Mac app (Apple Silicon). It bundles its own database, so there is
-no Docker, no server, and no account to create. It signs you in automatically.
+no Docker, no server, and no account or password.
 
-1. **Install LaTeX** once. The app compiles with your local TeX distribution:
-
-   ```bash
-   brew install --cask mactex-no-gui
-   ```
-
-2. **Build the app**:
+1. **Build the app**:
 
    ```bash
    pnpm install
    pnpm desktop:dist     # writes apps/desktop/dist/MyEditor-<version>-arm64.dmg
    ```
 
-3. Open the DMG and drag MyEditor to Applications. The build is unsigned, so the
+2. Open the DMG and drag MyEditor to Applications. The build is unsigned, so the
    first time, right-click the app and choose **Open**.
+
+3. On first launch MyEditor asks your name and sets up LaTeX by itself. It
+   downloads [TinyTeX](https://yihui.org/tinytex/) (about 210 MB) into
+   `~/Library/TinyTeX`, which needs no admin password. If you already have MacTeX
+   or another TeX Live on your `PATH`, it uses that and skips the download.
+   When a document needs a package TinyTeX doesn't ship, the build installs it
+   and retries; the build log says what it added.
 
 To use Claude or Codex, log the CLI in on your Mac (`claude`, `codex login`).
 The app finds them on your shell's `PATH`.
@@ -111,15 +112,17 @@ you can delete Docker entirely.
 
 ## When it breaks
 
-### Builds fail with "LaTeX is not installed"
+### Builds fail with "LaTeX is not installed yet"
 
-Install MacTeX (above) and restart MyEditor. The app looks for `latexmk` on your
-login shell's `PATH` and in `/Library/TeX/texbin`.
+The first-launch download didn't finish. Restart MyEditor and it picks up where
+setup left off. If it fails again, the welcome screen shows why; usually it's
+the internet connection.
 
-### A missing package error from a build
+### A build says a file or package was not found
 
-`mactex-no-gui` is the full TeX Live and has everything. If you went with
-BasicTeX instead, install the package with `sudo tlmgr install <package>`.
+MyEditor installs missing packages automatically, but only into TinyTeX. If you
+use MacTeX instead, install the package yourself with
+`sudo tlmgr install <package>`.
 
 ### The AI pane says the CLI is not installed or not logged in
 

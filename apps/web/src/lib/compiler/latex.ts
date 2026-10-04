@@ -3,17 +3,18 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { ENGINE_FLAGS, LIMITS } from "@myeditor/shared";
 import type { Engine } from "@myeditor/shared";
+import { installMissingPackage, texPath } from "./tex";
 
 const COMPILE_TIMEOUT = parseInt(
   process.env.COMPILE_TIMEOUT || String(LIMITS.COMPILE_TIMEOUT_DEFAULT),
   10
 );
 
-// MacTeX installs here; appended so latexmk resolves even if PATH lacks it.
-const TEXBIN_DIR = "/Library/TeX/texbin";
-
 const LATEX_MISSING_MESSAGE =
-  "LaTeX is not installed. Install MacTeX: brew install --cask mactex-no-gui, then restart MyEditor.";
+  "LaTeX is not installed yet. Restart MyEditor to finish setting it up.";
+
+// Each round can install one package; documents rarely miss more than a few.
+const MAX_PACKAGE_INSTALLS = 5;
 
 export interface CompileOptions {
   projectDir: string;
@@ -56,10 +57,36 @@ export async function detectEngine(
 }
 
 /**
+ * Compiles, installing any LaTeX package the document needs but TinyTeX
+ * lacks, then retrying.
+ */
+export async function runCompile(options: CompileOptions): Promise<CompileResult> {
+  let result = await runLatexmk(options);
+  const installed: string[] = [];
+
+  while (
+    result.exitCode !== 0 &&
+    !result.canceled &&
+    !result.timedOut &&
+    installed.length < MAX_PACKAGE_INSTALLS
+  ) {
+    const pkg = await installMissingPackage(result.logs);
+    if (!pkg || installed.includes(pkg)) break;
+    installed.push(pkg);
+    result = await runLatexmk(options);
+  }
+
+  if (installed.length > 0) {
+    result.logs = `[MyEditor] Installed missing LaTeX packages: ${installed.join(", ")}\n\n${result.logs}`;
+  }
+  return result;
+}
+
+/**
  * Runs latexmk in projectDir. The process is spawned in its own process group
  * so cancel/timeout can kill latexmk and the engine it launched together.
  */
-export async function runCompile(options: CompileOptions): Promise<CompileResult> {
+async function runLatexmk(options: CompileOptions): Promise<CompileResult> {
   const { projectDir, mainFile, engine: requestedEngine, signal } = options;
 
   const engineUsed: Exclude<Engine, "auto"> = requestedEngine && requestedEngine !== "auto"
@@ -90,7 +117,7 @@ export async function runCompile(options: CompileOptions): Promise<CompileResult
       cwd: projectDir,
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, PATH: `${process.env.PATH ?? ""}${path.delimiter}${TEXBIN_DIR}` },
+      env: { ...process.env, PATH: texPath() },
     });
 
     const killGroup = () => {

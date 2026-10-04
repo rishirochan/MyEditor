@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionJwt } from "@/lib/auth/jwt";
 
-// Desktop app: no login. "/" (marketing page) and the old auth pages go
-// straight to the dashboard; a missing session signs in the local user.
-const DASHBOARD_REDIRECTS = new Set(["/", "/login", "/register", "/forgot"]);
+// Desktop app: no login. "/" goes to onboarding (which passes straight
+// through once set up), the old auth pages go to the dashboard, and a missing
+// session signs in the local user.
+const DASHBOARD_REDIRECTS = new Set(["/login", "/register", "/forgot"]);
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
 
 function isPublic(pathname: string): boolean {
-  return pathname.startsWith("/share/");
+  return pathname === "/welcome" || pathname.startsWith("/share/");
 }
 
 function localLoginRedirect(request: NextRequest, pathname: string): NextResponse {
@@ -38,6 +39,10 @@ export async function middleware(request: NextRequest) {
     pathname.includes(".")
   ) {
     return NextResponse.next();
+  }
+
+  if (pathname === "/") {
+    return NextResponse.redirect(new URL("/welcome", request.url));
   }
 
   if (DASHBOARD_REDIRECTS.has(pathname) || pathname.startsWith("/reset/")) {

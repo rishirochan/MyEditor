@@ -15,8 +15,8 @@ const logFile = path.join(userData, "server.log");
 let pg = null;
 let server = null;
 
-// Apps launched from Finder get a bare PATH, so latexmk and the claude/codex
-// CLIs wouldn't be found. Borrow the login shell's PATH, plus MacTeX's bin.
+// Apps launched from Finder get a bare PATH, so a user's own TeX and the
+// claude/codex CLIs wouldn't be found. Borrow the login shell's PATH.
 function fixPath() {
   let shellPath = "";
   try {
@@ -31,7 +31,6 @@ function fixPath() {
   }
   process.env.PATH = [
     shellPath,
-    "/Library/TeX/texbin",
     "/opt/homebrew/bin",
     "/usr/local/bin",
     process.env.PATH,
@@ -126,7 +125,8 @@ async function start() {
     if (!url.startsWith(origin)) shell.openExternal(url);
     return { action: url.startsWith(origin) ? "allow" : "deny" };
   });
-  await win.loadURL(`${origin}/dashboard`);
+  // Onboarding on first launch; otherwise it redirects to the dashboard.
+  await win.loadURL(`${origin}/welcome`);
 }
 
 if (!app.requestSingleInstanceLock()) {
